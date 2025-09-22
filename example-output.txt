@@ -1,0 +1,62 @@
+$ dtm analyze --repo . --dockerfile Dockerfile --max-commits 10
+
+🚀 Analyzing 10 commits...
+████████████████████████████████████████ 100% |10/10|
+
+📊 Docker Image Evolution Report
+=================================
+Commit   Date        Author      Size (MB)  Layers  Build Time  Message
+───────  ──────────  ──────────  ─────────  ──────  ──────────  ────────────────────────────
+a3b4c5d  2024-01-01  John Doe    245.32     12      45.2s       Initial Dockerfile
+b4c5d6e  2024-01-05  Jane Smith  247.89     13      46.1s       Add development dependencies
+c5d6e7f  2024-01-10  John Doe    248.12     13      46.5s       Update base image
+d6e7f8g  2024-01-15  Bob Wilson  389.45     18      72.3s       Add ML libraries
+e7f8g9h  2024-01-20  Jane Smith  391.23     18      73.1s       Fix security vulnerabilities
+f8g9h0i  2024-01-25  John Doe    392.01     18      73.5s       Update pip packages
+g9h0i1j  2024-02-01  Alice Lee   523.67     22      95.2s       Add data processing tools
+h0i1j2k  2024-02-05  Bob Wilson  525.44     22      96.0s       Configure production settings
+i1j2k3l  2024-02-10  Jane Smith  312.33     15      52.3s       Optimize layers and cleanup
+j2k3l4m  2024-02-15  John Doe    313.12     15      52.8s       Update documentation
+
+⚠️  Biggest size increase at commit d6e7f8g:
+   Author: Bob Wilson
+   Message: Add ML libraries
+   Size increased by: 141.33 MB (57.4% increase)
+
+💡 Optimization opportunity detected at commit i1j2k3l:
+   Author: Jane Smith
+   Successfully reduced image size by 213.11 MB (40.6% reduction)
+
+// ========== Usage Examples ==========
+
+# 1. Quick analysis of current repo
+dtm analyze
+
+# 2. Analyze specific branch with all commits
+dtm analyze --branch feature/optimization --max-commits 0
+
+# 3. Generate interactive HTML report
+dtm analyze --format chart --output docker-analysis.html
+
+# 4. Find when image exceeded 500MB
+dtm bisect --size-threshold 500
+
+# 5. Compare two branches
+dtm compare --branch-a main --branch-b feature/slim-image
+
+# 6. Export data for further analysis
+dtm analyze --format csv > image-data.csv
+
+# 7. CI/CD integration - fail if image grew by >10%
+dtm check --max-growth 10 --base-branch main
+
+# 8. Analyze multiple Dockerfiles
+for df in Dockerfile*; do
+  dtm analyze --dockerfile $df --output ${df}-report.html
+done
+
+# 9. Historical analysis with specific date range
+dtm analyze --since "2024-01-01" --until "2024-03-01"
+
+# 10. Generate markdown report for PR comments
+dtm analyze --format markdown > pr-comment.md
