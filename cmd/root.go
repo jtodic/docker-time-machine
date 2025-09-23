@@ -38,7 +38,7 @@ func Execute() {
 
 func init() {
 	cobra.OnInitialize(initConfig)
-
+	
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is .dtm.yml)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
 }

@@ -1,0 +1,9 @@
+# DTM Configuration
+dockerfile: Dockerfile
+max_commits: 20
+branch: main
+cache: true
+thresholds:
+  max_size: 1000  # MB
+  max_time: 300   # seconds
+  max_layers: 50

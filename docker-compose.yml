@@ -10,13 +10,3 @@ services:
     environment:
       - DOCKER_HOST=unix:///var/run/docker.sock
     command: analyze --format chart --output /workspace/report.html
-
-  dtm-dev:
-    image: golang:1.21-alpine
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - .:/app
-    working_dir: /app
-    environment:
-      - CGO_ENABLED=0
-    command: go run main.go analyze

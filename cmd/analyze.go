@@ -3,10 +3,12 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
+	"strings"
 
-	"github.com/jtodic/dockerfile-time-machine/pkg/analyzer"
 	"github.com/spf13/cobra"
+	"github.com/yourusername/dockerfile-time-machine/pkg/analyzer"
 )
 
 var analyzeFlags struct {
@@ -54,9 +56,9 @@ func init() {
 
 func runAnalyze(cmd *cobra.Command, args []string) error {
 	// Validate flags
-	if analyzeFlags.format != "table" && analyzeFlags.format != "json" &&
-		analyzeFlags.format != "csv" && analyzeFlags.format != "chart" &&
-		analyzeFlags.format != "markdown" {
+	if analyzeFlags.format != "table" && analyzeFlags.format != "json" && 
+	   analyzeFlags.format != "csv" && analyzeFlags.format != "chart" && 
+	   analyzeFlags.format != "markdown" {
 		return fmt.Errorf("invalid format: %s", analyzeFlags.format)
 	}
 
@@ -92,10 +94,10 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := context.Background()
-
+	
 	fmt.Fprintf(os.Stderr, "🔍 Analyzing repository: %s\n", analyzeFlags.repoPath)
 	fmt.Fprintf(os.Stderr, "📄 Dockerfile: %s\n", analyzeFlags.dockerfilePath)
-
+	
 	if err := tm.Run(ctx); err != nil {
 		return fmt.Errorf("analysis failed: %w", err)
 	}

@@ -1,45 +1,24 @@
 # Binaries
 bin/
 *.exe
-*.dll
-*.so
-*.dylib
 dtm
 
-# Test binary, built with `go test -c`
+# Test files
 *.test
-
-# Output of the go coverage tool
 *.out
 coverage.html
-coverage.txt
-
-# Go workspace file
-go.work
-
-# Dependency directories
-vendor/
 
 # Build artifacts
 dist/
 *.tar.gz
-*.zip
 
 # DTM specific
 .dtm-cache/
-*.html
+report*.html
 *.json
 *.csv
-report-*.html
 
 # IDE
 .idea/
 .vscode/
-*.swp
-*.swo
-*~
 .DS_Store
-
-# Environment variables
-.env
-.env.local
