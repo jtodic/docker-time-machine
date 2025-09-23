@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/yourusername/dockerfile-time-machine/cmd"
+	"github.com/jtodic/dockerfile-time-machine/cmd"
 )
 
 func main() {

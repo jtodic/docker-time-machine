@@ -1,4 +1,4 @@
-module github.com/yourusername/dockerfile-time-machine
+module github.com/jtodic/dockerfile-time-machine
 
 go 1.21
 

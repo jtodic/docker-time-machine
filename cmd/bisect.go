@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/jtodic/dockerfile-time-machine/pkg/bisect"
 	"github.com/spf13/cobra"
-	"github.com/yourusername/dockerfile-time-machine/pkg/bisect"
 )
 
 var bisectFlags struct {
