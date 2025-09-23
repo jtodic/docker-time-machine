@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/yourusername/dockerfile-time-machine/pkg/bisect"
@@ -43,7 +42,7 @@ func init() {
 	bisectCmd.Flags().Float64Var(&bisectFlags.timeThreshold, "time-threshold", 0, "Build time threshold in seconds")
 	bisectCmd.Flags().StringVar(&bisectFlags.goodCommit, "good", "", "Known good commit (optional)")
 	bisectCmd.Flags().StringVar(&bisectFlags.badCommit, "bad", "", "Known bad commit (optional)")
-	
+
 	bisectCmd.MarkFlagsMutuallyExclusive("size-threshold", "time-threshold")
 }
 
@@ -68,9 +67,9 @@ func runBisect(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := context.Background()
-	
+
 	fmt.Fprintf(os.Stderr, "🔎 Starting bisect...\n")
-	
+
 	result, err := b.FindRegression(ctx)
 	if err != nil {
 		return fmt.Errorf("bisect failed: %w", err)
@@ -80,7 +79,7 @@ func runBisect(cmd *cobra.Command, args []string) error {
 	fmt.Printf("📝 Message: %s\n", result.CommitMessage)
 	fmt.Printf("👤 Author: %s\n", result.Author)
 	fmt.Printf("📅 Date: %s\n", result.Date)
-	
+
 	if bisectFlags.sizeThreshold > 0 {
 		fmt.Printf("📦 Size: %.2f MB (threshold: %.2f MB)\n", result.SizeMB, bisectFlags.sizeThreshold)
 	}
