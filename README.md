@@ -1,4 +1,4 @@
-# 🐳 Dockerfile Time Machine (DTM)
+# 🐳 Docker Time Machine (DTM)
 
 Track your Docker image evolution through git history locally!
 
