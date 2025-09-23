@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/jtodic/dockerfile-time-machine/pkg/bisect"
+	"github.com/jtodic/docker-time-machine/pkg/bisect"
 	"github.com/spf13/cobra"
 )
 

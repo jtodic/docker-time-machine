@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/jtodic/dockerfile-time-machine/pkg/analyzer"
+	"github.com/jtodic/docker-time-machine/pkg/analyzer"
 	"github.com/spf13/cobra"
 )
 
