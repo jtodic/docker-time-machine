@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-	"github.com/yourusername/dockerfile-time-machine/pkg/analyzer"
+	"github.com/jtodic/docker-time-machine/pkg/analyzer"
 )
 
 var compareFlags struct {
