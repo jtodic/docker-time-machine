@@ -175,15 +175,19 @@ func (b *Builder) GetImageInfo(ctx context.Context, imageID string) (*types.Imag
 }
 
 //// GetImageHistory retrieves the history of a Docker image
-//func (b *Builder) GetImageHistory(ctx context.Context, imageID string) ([]types.ImageHistory, error) {
-//	return b.client.ImageHistory(ctx, imageID)
+//func (b *Builder) GetImageHistory(ctx context.Context, imageID string) ([]types.ImageHistoryResponseItem, error) {
+//	history, err := b.client.ImageHistory(ctx, imageID)
+//	if err != nil {
+//		return nil, err
+//	}
+//	return history, nil
 //}
 //
-//// RemoveImage removes a Docker image
+//// RemoveImage removes a Docker image by ID or name
 //func (b *Builder) RemoveImage(ctx context.Context, imageID string) error {
 //	_, err := b.client.ImageRemove(ctx, imageID, types.ImageRemoveOptions{
-//		Force:         true,
-//		PruneChildren: true,
+//		Force:         true, // force removal
+//		PruneChildren: true, // remove untagged parent images
 //	})
 //	return err
 //}
