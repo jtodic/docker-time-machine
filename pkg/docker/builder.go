@@ -174,19 +174,19 @@ func (b *Builder) GetImageInfo(ctx context.Context, imageID string) (*types.Imag
 	return &inspect, nil
 }
 
-// GetImageHistory retrieves the history of a Docker image
-func (b *Builder) GetImageHistory(ctx context.Context, imageID string) ([]types.ImageHistory, error) {
-	return b.client.ImageHistory(ctx, imageID)
-}
-
-// RemoveImage removes a Docker image
-func (b *Builder) RemoveImage(ctx context.Context, imageID string) error {
-	_, err := b.client.ImageRemove(ctx, imageID, types.ImageRemoveOptions{
-		Force:         true,
-		PruneChildren: true,
-	})
-	return err
-}
+//// GetImageHistory retrieves the history of a Docker image
+//func (b *Builder) GetImageHistory(ctx context.Context, imageID string) ([]types.ImageHistory, error) {
+//	return b.client.ImageHistory(ctx, imageID)
+//}
+//
+//// RemoveImage removes a Docker image
+//func (b *Builder) RemoveImage(ctx context.Context, imageID string) error {
+//	_, err := b.client.ImageRemove(ctx, imageID, types.ImageRemoveOptions{
+//		Force:         true,
+//		PruneChildren: true,
+//	})
+//	return err
+//}
 
 // Close closes the Docker client connection
 func (b *Builder) Close() error {
