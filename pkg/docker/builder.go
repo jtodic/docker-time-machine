@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/jsonmessage"
 )
@@ -43,9 +42,9 @@ func NewBuilder() (*Builder, error) {
 }
 
 // BuildImage builds a Docker image from the specified context
-func (b *Builder) BuildImage(ctx context.Context, contextPath, dockerfilePath, tag string) error {
+func (b *Builder) BuildImage(ctx context.Context, contextPath, dockerfileName, tag string) error {
 	// Create build context tar
-	buildContext, err := b.createBuildContext(contextPath, dockerfilePath)
+	buildContext, err := b.createBuildContext(contextPath)
 	if err != nil {
 		return fmt.Errorf("failed to create build context: %w", err)
 	}
@@ -53,12 +52,13 @@ func (b *Builder) BuildImage(ctx context.Context, contextPath, dockerfilePath, t
 	// Build options
 	opts := types.ImageBuildOptions{
 		Tags:           []string{tag},
-		Dockerfile:     dockerfilePath,
+		Dockerfile:     dockerfileName,
 		Remove:         true,
 		ForceRemove:    true,
 		PullParent:     false,
 		NoCache:        true,
 		SuppressOutput: false,
+		Context:        buildContext,
 	}
 
 	// Build the image
@@ -73,16 +73,10 @@ func (b *Builder) BuildImage(ctx context.Context, contextPath, dockerfilePath, t
 }
 
 // createBuildContext creates a tar archive of the build context
-func (b *Builder) createBuildContext(contextPath, dockerfilePath string) (io.Reader, error) {
+func (b *Builder) createBuildContext(contextPath string) (io.Reader, error) {
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
 	defer tw.Close()
-
-	// Check if Dockerfile exists
-	dockerfileFull := filepath.Join(contextPath, dockerfilePath)
-	if _, err := os.Stat(dockerfileFull); os.IsNotExist(err) {
-		return nil, fmt.Errorf("Dockerfile not found: %s", dockerfileFull)
-	}
 
 	// Walk the context directory
 	err := filepath.Walk(contextPath, func(path string, info os.FileInfo, err error) error {
@@ -90,23 +84,19 @@ func (b *Builder) createBuildContext(contextPath, dockerfilePath string) (io.Rea
 			return err
 		}
 
-		// Skip .git and .dockerignore paths
+		// Skip .git and other unnecessary directories
 		relPath, err := filepath.Rel(contextPath, path)
 		if err != nil {
 			return err
 		}
 
+		// Skip unwanted paths
 		if strings.HasPrefix(relPath, ".git") ||
 			strings.HasPrefix(relPath, ".dtm-cache") ||
-			info.Name() == ".dockerignore" {
+			relPath == "." {
 			if info.IsDir() {
 				return filepath.SkipDir
 			}
-			return nil
-		}
-
-		// Skip directories (they're created implicitly)
-		if info.IsDir() {
 			return nil
 		}
 
@@ -124,15 +114,21 @@ func (b *Builder) createBuildContext(contextPath, dockerfilePath string) (io.Rea
 			return err
 		}
 
-		// Write file content
-		file, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		defer file.Close()
+		// Write file content for regular files
+		if !info.IsDir() {
+			file, err := os.Open(path)
+			if err != nil {
+				return err
+			}
+			defer file.Close()
 
-		_, err = io.Copy(tw, file)
-		return err
+			_, err = io.Copy(tw, file)
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
 	})
 
 	if err != nil {
@@ -160,38 +156,36 @@ func (b *Builder) processBuildOutput(reader io.Reader) error {
 			return fmt.Errorf("build error: %s", msg.Error.Message)
 		}
 
-		// Optionally print progress
-		if msg.Stream != "" {
-			// Could print to stderr if verbose mode
-			// fmt.Fprint(os.Stderr, msg.Stream)
+		// Optionally print progress (you can make this conditional on verbose flag)
+		if msg.Stream != "" && strings.Contains(msg.Stream, "Step") {
+			fmt.Fprint(os.Stderr, msg.Stream)
 		}
 	}
 
 	return nil
 }
 
+// GetImageInfo retrieves information about a Docker image
+func (b *Builder) GetImageInfo(ctx context.Context, imageID string) (*types.ImageInspect, error) {
+	inspect, _, err := b.client.ImageInspectWithRaw(ctx, imageID)
+	if err != nil {
+		return nil, err
+	}
+	return &inspect, nil
+}
+
+// GetImageHistory retrieves the history of a Docker image
+func (b *Builder) GetImageHistory(ctx context.Context, imageID string) ([]types.ImageHistory, error) {
+	return b.client.ImageHistory(ctx, imageID)
+}
+
 // RemoveImage removes a Docker image
 func (b *Builder) RemoveImage(ctx context.Context, imageID string) error {
-	_, err := b.client.ImageRemove(ctx, imageID, image.RemoveOptions{
+	_, err := b.client.ImageRemove(ctx, imageID, types.ImageRemoveOptions{
 		Force:         true,
 		PruneChildren: true,
 	})
 	return err
-}
-
-// ImageExists checks if an image exists
-func (b *Builder) ImageExists(ctx context.Context, imageID string) bool {
-	_, _, err := b.client.ImageInspectWithRaw(ctx, imageID)
-	return err == nil
-}
-
-// GetImageSize returns the size of an image in bytes
-func (b *Builder) GetImageSize(ctx context.Context, imageID string) (int64, error) {
-	inspect, _, err := b.client.ImageInspectWithRaw(ctx, imageID)
-	if err != nil {
-		return 0, err
-	}
-	return inspect.Size, nil
 }
 
 // Close closes the Docker client connection

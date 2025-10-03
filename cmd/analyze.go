@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/jtodic/docker-time-machine/pkg/analyzer"
 	"github.com/spf13/cobra"
+	"github.com/yourusername/dockerfile-time-machine/pkg/analyzer"
 )
 
 var analyzeFlags struct {
@@ -53,11 +53,32 @@ func init() {
 }
 
 func runAnalyze(cmd *cobra.Command, args []string) error {
-	// Validate flags
-	if analyzeFlags.format != "table" && analyzeFlags.format != "json" &&
-		analyzeFlags.format != "csv" && analyzeFlags.format != "chart" &&
-		analyzeFlags.format != "markdown" {
-		return fmt.Errorf("invalid format: %s", analyzeFlags.format)
+	// Create analyzer config
+	config := analyzer.Config{
+		RepoPath:       analyzeFlags.repoPath,
+		DockerfilePath: analyzeFlags.dockerfilePath,
+		MaxCommits:     analyzeFlags.maxCommits,
+		Branch:         analyzeFlags.branch,
+		Since:          analyzeFlags.since,
+		Until:          analyzeFlags.until,
+		SkipFailed:     analyzeFlags.skipFailed,
+		Verbose:        verbose,
+	}
+
+	// Create analyzer
+	tm, err := analyzer.NewTimeMachine(config)
+	if err != nil {
+		return fmt.Errorf("failed to create analyzer: %w", err)
+	}
+
+	ctx := context.Background()
+
+	fmt.Fprintf(os.Stderr, "🔍 Analyzing repository: %s\n", analyzeFlags.repoPath)
+	fmt.Fprintf(os.Stderr, "📄 Dockerfile: %s\n", analyzeFlags.dockerfilePath)
+
+	// Run analysis
+	if err := tm.Run(ctx); err != nil {
+		return fmt.Errorf("analysis failed: %w", err)
 	}
 
 	// Setup output writer
@@ -71,33 +92,6 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 		defer output.Close()
 	} else {
 		output = os.Stdout
-	}
-
-	// Create analyzer config
-	config := analyzer.Config{
-		RepoPath:       analyzeFlags.repoPath,
-		DockerfilePath: analyzeFlags.dockerfilePath,
-		MaxCommits:     analyzeFlags.maxCommits,
-		Branch:         analyzeFlags.branch,
-		Since:          analyzeFlags.since,
-		Until:          analyzeFlags.until,
-		SkipFailed:     analyzeFlags.skipFailed,
-		Verbose:        verbose,
-	}
-
-	// Create and run analyzer
-	tm, err := analyzer.NewTimeMachine(config)
-	if err != nil {
-		return fmt.Errorf("failed to create analyzer: %w", err)
-	}
-
-	ctx := context.Background()
-
-	fmt.Fprintf(os.Stderr, "🔍 Analyzing repository: %s\n", analyzeFlags.repoPath)
-	fmt.Fprintf(os.Stderr, "📄 Dockerfile: %s\n", analyzeFlags.dockerfilePath)
-
-	if err := tm.Run(ctx); err != nil {
-		return fmt.Errorf("analysis failed: %w", err)
 	}
 
 	// Generate report

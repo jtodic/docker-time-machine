@@ -14,8 +14,8 @@ var (
 
 var rootCmd = &cobra.Command{
 	Use:   "dtm",
-	Short: "Docker Time Machine - Track Docker image evolution through git history",
-	Long: `DTM (Docker Time Machine) analyzes how your Docker images have evolved 
+	Short: "Dockerfile Time Machine - Track Docker image evolution through git history",
+	Long: `DTM (Dockerfile Time Machine) analyzes how your Docker images have evolved 
 over time by building images at different points in your git history.
 
 It helps identify when and why your images became bloated, tracks build time trends,
@@ -37,12 +37,5 @@ func Execute() {
 }
 
 func init() {
-	cobra.OnInitialize(initConfig)
-
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is .dtm.yml)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
-}
-
-func initConfig() {
-	// Config initialization logic here
 }
