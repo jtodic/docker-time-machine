@@ -2,11 +2,12 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 
-	"github.com/spf13/cobra"
 	"github.com/jtodic/docker-time-machine/pkg/analyzer"
+	"github.com/spf13/cobra"
 )
 
 var compareFlags struct {
@@ -34,7 +35,7 @@ func init() {
 	compareCmd.Flags().StringVarP(&compareFlags.branchA, "branch-a", "a", "main", "First branch to compare")
 	compareCmd.Flags().StringVarP(&compareFlags.branchB, "branch-b", "b", "", "Second branch to compare")
 	compareCmd.Flags().StringVarP(&compareFlags.format, "format", "f", "table", "Output format: table, json")
-	
+
 	compareCmd.MarkFlagRequired("branch-b")
 }
 
@@ -49,9 +50,9 @@ func runCompare(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := context.Background()
-	
+
 	fmt.Fprintf(os.Stderr, "📊 Comparing branches: %s vs %s\n", compareFlags.branchA, compareFlags.branchB)
-	
+
 	result, err := comparer.Compare(ctx, compareFlags.branchA, compareFlags.branchB)
 	if err != nil {
 		return fmt.Errorf("comparison failed: %w", err)
@@ -59,8 +60,6 @@ func runCompare(cmd *cobra.Command, args []string) error {
 
 	// Display results
 	if compareFlags.format == "json" {
-		// JSON output
-		import "encoding/json"
 		encoder := json.NewEncoder(os.Stdout)
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(result)
@@ -68,17 +67,17 @@ func runCompare(cmd *cobra.Command, args []string) error {
 		// Table format (default)
 		fmt.Printf("\n📈 Comparison Results\n")
 		fmt.Printf("════════════════════\n\n")
-		
+
 		fmt.Printf("Branch A: %s (commit: %s)\n", result.BranchA.Name, result.BranchA.Commit)
 		fmt.Printf("  Size: %.2f MB\n", result.BranchA.SizeMB)
 		fmt.Printf("  Layers: %d\n", result.BranchA.Layers)
 		fmt.Printf("  Build Time: %.2fs\n\n", result.BranchA.BuildTime)
-		
+
 		fmt.Printf("Branch B: %s (commit: %s)\n", result.BranchB.Name, result.BranchB.Commit)
 		fmt.Printf("  Size: %.2f MB\n", result.BranchB.SizeMB)
 		fmt.Printf("  Layers: %d\n", result.BranchB.Layers)
 		fmt.Printf("  Build Time: %.2fs\n\n", result.BranchB.BuildTime)
-		
+
 		fmt.Printf("Differences:\n")
 		fmt.Printf("  Size: %+.2f MB (%+.1f%%)\n", result.SizeDiff, result.SizeDiffPercent)
 		fmt.Printf("  Layers: %+d\n", result.LayersDiff)

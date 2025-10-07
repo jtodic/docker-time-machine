@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/jsonmessage"
 )
@@ -174,23 +175,23 @@ func (b *Builder) GetImageInfo(ctx context.Context, imageID string) (*types.Imag
 	return &inspect, nil
 }
 
-//// GetImageHistory retrieves the history of a Docker image
-//func (b *Builder) GetImageHistory(ctx context.Context, imageID string) ([]types.ImageHistoryResponseItem, error) {
-//	history, err := b.client.ImageHistory(ctx, imageID)
-//	if err != nil {
-//		return nil, err
-//	}
-//	return history, nil
-//}
-//
-//// RemoveImage removes a Docker image by ID or name
-//func (b *Builder) RemoveImage(ctx context.Context, imageID string) error {
-//	_, err := b.client.ImageRemove(ctx, imageID, types.ImageRemoveOptions{
-//		Force:         true, // force removal
-//		PruneChildren: true, // remove untagged parent images
-//	})
-//	return err
-//}
+// GetImageHistory retrieves the history of a Docker image
+func (b *Builder) GetImageHistory(ctx context.Context, imageID string) ([]image.HistoryResponseItem, error) {
+	history, err := b.client.ImageHistory(ctx, imageID)
+	if err != nil {
+		return nil, err
+	}
+	return history, nil
+}
+
+// RemoveImage removes a Docker image by ID or name
+func (b *Builder) RemoveImage(ctx context.Context, imageID string) error {
+	_, err := b.client.ImageRemove(ctx, imageID, image.RemoveOptions{
+		Force:         true,
+		PruneChildren: true,
+	})
+	return err
+}
 
 // Close closes the Docker client connection
 func (b *Builder) Close() error {
