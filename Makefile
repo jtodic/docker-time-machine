@@ -33,8 +33,16 @@ clean:
 
 ## install: Install binary to GOPATH
 install:
-	@go install $(LDFLAGS)
+	@echo "Building $(BINARY)..."
+	@go build $(LDFLAGS) -o $(BINARY) main.go
+	@if [ -z "$(GOPATH)" ]; then \
+		echo "Error: GOPATH is not set"; \
+		exit 1; \
+	fi
+	@mkdir -p $(GOPATH)/bin
+	@mv $(BINARY) $(GOPATH)/bin/$(BINARY)
 	@echo "Installed to $(GOPATH)/bin/$(BINARY)"
+	@which $(BINARY) || echo "Note: Make sure $(GOPATH)/bin is in your PATH"
 
 ## docker-build: Build Docker image
 docker-build:

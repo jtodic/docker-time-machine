@@ -35,11 +35,6 @@ make build
 make install
 ```
 
-### Using Docker
-```bash
-docker-compose run --rm dtm analyze
-```
-
 ## Commands
 
 - `analyze` - Analyze image evolution
