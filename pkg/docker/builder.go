@@ -37,7 +37,7 @@ func NewBuilder() (*Builder, error) {
 	ctx := context.Background()
 	_, err = cli.Ping(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("Docker daemon not responding: %w", err)
+		return nil, fmt.Errorf("docker daemon not responding: %w", err)
 	}
 
 	return &Builder{client: cli}, nil
