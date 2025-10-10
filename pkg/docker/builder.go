@@ -93,9 +93,12 @@ func (b *Builder) createBuildContext(contextPath string) (io.Reader, error) {
 		}
 
 		// Skip unwanted paths
-		if strings.HasPrefix(relPath, ".git") ||
-			strings.HasPrefix(relPath, ".dtm-cache") ||
-			relPath == "." {
+		if relPath == "." {
+			return nil
+		}
+
+		// Skip .git and .dtm-cache directories entirely
+		if strings.HasPrefix(relPath, ".git") || strings.HasPrefix(relPath, ".dtm-cache") {
 			if info.IsDir() {
 				return filepath.SkipDir
 			}
