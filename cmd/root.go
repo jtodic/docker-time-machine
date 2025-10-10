@@ -8,7 +8,6 @@ import (
 )
 
 var (
-	cfgFile string
 	verbose bool
 )
 
