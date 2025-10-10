@@ -277,6 +277,12 @@ func (tm *TimeMachine) analyzeCommit(ctx context.Context, commit *object.Commit)
 		dockerfileName = filepath.Base(tm.config.DockerfilePath)
 	}
 
+	fmt.Println("test počinje ovdje:")
+	fmt.Println(ctx)
+	fmt.Println(contextPath)
+	fmt.Println(dockerfileName)
+	fmt.Println(imageName)
+
 	// Build the image
 	err = tm.builder.BuildImage(ctx, contextPath, dockerfileName, imageName)
 	if err != nil {
