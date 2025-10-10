@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/build"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/jsonmessage"
@@ -51,7 +52,7 @@ func (b *Builder) BuildImage(ctx context.Context, contextPath, dockerfileName, t
 	}
 
 	// Build options
-	opts := types.ImageBuildOptions{
+	opts := build.ImageBuildOptions{
 		Tags:           []string{tag},
 		Dockerfile:     dockerfileName,
 		Remove:         true,
