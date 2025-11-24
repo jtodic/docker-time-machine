@@ -65,7 +65,7 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 		Verbose:        verbose,
 	}
 
-	fmt.Printf("%+v\n", config)
+	fmt.Printf("\n%+v\n\n", config)
 
 	// Create analyzer
 	tm, err := analyzer.NewTimeMachine(config)
@@ -73,7 +73,7 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create analyzer: %w", err)
 	}
 
-	fmt.Printf("%+v\n", tm)
+	fmt.Printf("\n%+v\n\n", tm)
 
 	ctx := context.Background()
 
