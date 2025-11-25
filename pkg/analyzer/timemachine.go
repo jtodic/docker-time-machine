@@ -165,6 +165,9 @@ func (tm *TimeMachine) Run(ctx context.Context) error {
 	if checkoutErr != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to restore original branch: %v\n", checkoutErr)
 	}
+
+	fmt.Fprintf(os.Stderr, "\n")
+	return nil
 }
 
 // getCommits retrieves commits that modified the Dockerfile
