@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/build"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/client"
@@ -171,8 +170,8 @@ func (b *Builder) processBuildOutput(reader io.Reader) error {
 }
 
 // GetImageInfo retrieves information about a Docker image
-func (b *Builder) GetImageInfo(ctx context.Context, imageID string) (*types.ImageInspect, error) {
-	inspect, _, err := b.client.ImageInspectWithRaw(ctx, imageID)
+func (b *Builder) GetImageInfo(ctx context.Context, imageID string) (*image.InspectResponse, error) {
+	inspect, err := b.client.ImageInspect(ctx, imageID)
 	if err != nil {
 		return nil, err
 	}
