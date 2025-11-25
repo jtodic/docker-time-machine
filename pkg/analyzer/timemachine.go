@@ -147,17 +147,24 @@ func (tm *TimeMachine) Run(ctx context.Context) error {
 	}
 
 	// Restore original branch
-	err = worktree.Checkout(&git.CheckoutOptions{
-		Hash:  originalRef.Hash(),
-		Force: true,
-	})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to restore original branch: %v\n", err)
+	var checkoutErr error
+	if originalRef.Name().IsBranch() {
+		// Was on a branch - restore the branch (not detached)
+		checkoutErr = worktree.Checkout(&git.CheckoutOptions{
+			Branch: originalRef.Name(),
+			Force:  true,
+		})
+	} else {
+		// Was detached HEAD - restore the commit
+		checkoutErr = worktree.Checkout(&git.CheckoutOptions{
+			Hash:  originalRef.Hash(),
+			Force: true,
+		})
 	}
 
-	fmt.Fprintf(os.Stderr, "\n")
-	return nil
-}
+	if checkoutErr != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to restore original branch: %v\n", checkoutErr)
+	}
 
 // getCommits retrieves commits that modified the Dockerfile
 func (tm *TimeMachine) getCommits() ([]*object.Commit, error) {
