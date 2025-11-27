@@ -11,7 +11,7 @@ Commits are analyzed following git's parent chain (depth-first), not in chronolo
 - 🎯 Binary search for regressions
 - 🔄 Compare branches locally
 
-> ⚠️ **Note on Build Times:** Build times are indicative only and depend on Docker's layer cache state.
+⚠️ **Note on Build Times:** Build times are indicative only and depend on Docker's layer cache state.
 
 ## Quick Start
 
