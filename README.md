@@ -1,6 +1,7 @@
 # 🐳 Docker Time Machine (DTM)
 
 Track your Docker image evolution through git history locally!
+Commits are analyzed following git's parent chain (depth-first), not in chronological order by date.
 
 ## Features
 - 📊 Track image size changes across commits
@@ -9,6 +10,8 @@ Track your Docker image evolution through git history locally!
 - 📈 Generate interactive HTML reports
 - 🎯 Binary search for regressions
 - 🔄 Compare branches locally
+
+> ⚠️ **Note on Build Times:** Build times are indicative only and depend on Docker's layer cache state.
 
 ## Quick Start
 
