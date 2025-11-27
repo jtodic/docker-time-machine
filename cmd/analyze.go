@@ -27,7 +27,7 @@ var analyzeCmd = &cobra.Command{
 	Long: `Build and analyze Docker images at different commits to track size and build time evolution.
 	
 This command will:
-1. Traverse git history for commits that modified the Dockerfile
+1. Follow git commit history (parent chain, not chronological)
 2. Build the image at each commit point
 3. Record size, build time, and layer information
 4. Generate a report in the specified format`,
