@@ -170,7 +170,7 @@ func (tm *TimeMachine) Run(ctx context.Context) error {
 	return nil
 }
 
-// getCommits retrieves commits that modified the Dockerfile
+// getCommits retrieves all commits
 func (tm *TimeMachine) getCommits() ([]*object.Commit, error) {
 	var commits []*object.Commit
 
@@ -207,11 +207,10 @@ func (tm *TimeMachine) getCommits() ([]*object.Commit, error) {
 		}
 	}
 
-	// Get commit iterator
+	// Get commit iterator - all commits, not filtered by file
 	commitIter, err := tm.repo.Log(&git.LogOptions{
-		From:     ref.Hash(),
-		FileName: &tm.config.DockerfilePath,
-		All:      false,
+		From: ref.Hash(),
+		All:  false,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get log: %w", err)
@@ -238,11 +237,6 @@ func (tm *TimeMachine) getCommits() ([]*object.Commit, error) {
 
 	if err != nil {
 		return nil, err
-	}
-
-	// Reverse to get chronological order
-	for i, j := 0, len(commits)-1; i < j; i, j = i+1, j-1 {
-		commits[i], commits[j] = commits[j], commits[i]
 	}
 
 	return commits, nil
