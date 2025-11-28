@@ -24,17 +24,41 @@ var analyzeFlags struct {
 var analyzeCmd = &cobra.Command{
 	Use:   "analyze",
 	Short: "Analyze Docker image evolution across git history",
-	Long: `Build and analyze Docker images at different commits to track size and build time evolution.
-	
-This command will:
-1. Follow git commit history (parent chain, not chronological)
-2. Build the image at each commit point
-3. Record size, build time, and layer information
-4. Generate a report in the specified format`,
-	Example: `  dtm analyze --repo /path/to/repo
+	Long: `Build Docker images at each commit in your repository's history to track
+how image size, build time, and layer count have changed over time.
+
+The analyzer walks through commits following git's parent chain (depth-first
+traversal), not chronological order. At each commit, it:
+
+  • Checks out the repository state
+  • Builds the Docker image using the specified Dockerfile
+  • Records metrics: image size, layer count, build time
+  • Calculates size deltas between consecutive successful builds
+  • Cleans up temporary images
+
+Output formats include interactive HTML charts, tables, JSON, CSV, and Markdown.
+The tool automatically identifies commits that caused the largest size increases
+(bloat) or decreases (optimizations).
+
+Note: Build times are indicative only—they depend on Docker's layer cache state
+and system load at the time of analysis.`,
+	Example: `  # Analyze current repo with default settings (last 20 commits, table output)
+  dtm analyze
+
+  # Generate an interactive HTML report with charts
   dtm analyze --format chart --output report.html
+
+  # Analyze a specific branch, limiting to 50 commits
   dtm analyze --branch develop --max-commits 50
-  dtm analyze --since "2024-01-01" --until "2024-12-31"`,
+
+  # Analyze commits within a date range
+  dtm analyze --since "2024-01-01" --until "2024-12-31"
+
+  # Analyze a different repo with a custom Dockerfile path
+  dtm analyze --repo /path/to/project --dockerfile build/Dockerfile
+
+  # Skip commits that fail to build and continue analysis
+  dtm analyze --skip-failed`,
 	RunE: runAnalyze,
 }
 

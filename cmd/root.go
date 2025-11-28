@@ -13,16 +13,36 @@ var (
 
 var rootCmd = &cobra.Command{
 	Use:   "dtm",
-	Short: "Dockerfile Time Machine - Track Docker image evolution through git history",
-	Long: `DTM (Dockerfile Time Machine) analyzes how your Docker images have evolved 
-over time by building images at different points in your git history.
+	Short: "Docker Time Machine - Track Docker image evolution through git history",
+	Long: `DTM (Docker Time Machine) helps you understand how your Docker images have
+evolved over time by building them at different points in your git history.
 
-It helps identify when and why your images became bloated, tracks build time trends,
-and provides insights for optimization.
+Use DTM to:
 
-Examples:
-  dtm analyze                                        # Analyze current repo
-  dtm analyze --format chart --output report.html    # Generate HTML charts`,
+  • Find the exact commit that introduced image bloat
+  • Track build time trends across your project's history
+  • Monitor layer count changes over time
+  • Generate reports to share with your team
+  • Compare image metrics between branches or tags
+
+DTM walks through your git history, builds the Docker image at each commit,
+and records key metrics. It then generates reports showing trends and
+highlighting significant changes—both regressions and optimizations.
+
+Getting started:
+  Run 'dtm analyze' in a git repository containing a Dockerfile to generate
+  your first report. Use 'dtm analyze --help' for all available options.`,
+	Example: `  # Quick analysis of current repo
+  dtm analyze
+
+  # Generate HTML charts for visualization
+  dtm analyze --format chart --output report.html
+
+  # Analyze last 10 commits with verbose output
+  dtm analyze -n 10 -v
+
+  # Export to JSON for further processing
+  dtm analyze --format json --output metrics.json`,
 	Version: "1.0.0",
 }
 
