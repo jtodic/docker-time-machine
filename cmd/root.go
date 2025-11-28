@@ -22,9 +22,7 @@ and provides insights for optimization.
 
 Examples:
   dtm analyze                                        # Analyze current repo
-  dtm analyze --format chart --output report.html    # Generate HTML charts
-  dtm bisect --size-threshold 500                    # Find when image exceeded 500MB
-  dtm compare -a main -b develop                     # Compare branches`,
+  dtm analyze --format chart --output report.html    # Generate HTML charts`,
 	Version: "1.0.0",
 }
 
