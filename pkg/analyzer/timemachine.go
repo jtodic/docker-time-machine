@@ -30,17 +30,26 @@ type Config struct {
 	Verbose        bool
 }
 
+// LayerInfo represents information about a single Docker image layer
+type LayerInfo struct {
+	ID        string  `json:"id,omitempty"`
+	CreatedBy string  `json:"created_by"`
+	Size      int64   `json:"size"`
+	SizeMB    float64 `json:"size_mb"`
+}
+
 // BuildResult represents the result of building a Docker image at a specific commit
 type BuildResult struct {
-	CommitHash    string    `json:"commit_hash"`
-	CommitMessage string    `json:"commit_message"`
-	Author        string    `json:"author"`
-	Date          time.Time `json:"date"`
-	ImageSize     int64     `json:"image_size"`
-	BuildTime     float64   `json:"build_time_seconds"`
-	LayerCount    int       `json:"layer_count"`
-	Error         string    `json:"error,omitempty"`
-	SizeDiff      int64     `json:"size_diff,omitempty"`
+	CommitHash    string      `json:"commit_hash"`
+	CommitMessage string      `json:"commit_message"`
+	Author        string      `json:"author"`
+	Date          time.Time   `json:"date"`
+	ImageSize     int64       `json:"image_size"`
+	BuildTime     float64     `json:"build_time_seconds"`
+	LayerCount    int         `json:"layer_count"`
+	Layers        []LayerInfo `json:"layers,omitempty"`
+	Error         string      `json:"error,omitempty"`
+	SizeDiff      int64       `json:"size_diff,omitempty"`
 }
 
 // TimeMachine is the main analyzer
@@ -302,6 +311,24 @@ func (tm *TimeMachine) analyzeCommit(ctx context.Context, commit *object.Commit)
 	result.ImageSize = imageInfo.Size
 	result.LayerCount = len(imageInfo.RootFS.Layers)
 
+	// Get layer history for detailed layer information
+	history, err := tm.builder.GetImageHistory(ctx, imageName)
+	if err == nil {
+		for _, layer := range history {
+			// Skip empty layers (metadata-only)
+			if layer.Size == 0 {
+				continue
+			}
+			layerInfo := LayerInfo{
+				ID:        layer.ID,
+				CreatedBy: truncateLayerCommand(layer.CreatedBy),
+				Size:      layer.Size,
+				SizeMB:    float64(layer.Size) / 1024 / 1024,
+			}
+			result.Layers = append(result.Layers, layerInfo)
+		}
+	}
+
 	// Clean up the image
 	tm.builder.RemoveImage(ctx, imageName)
 
@@ -383,6 +410,31 @@ func (tm *TimeMachine) generateTableReport(w io.Writer) error {
 		fmt.Fprintf(w, "   Message: %s\n", optimization.CommitMessage)
 	}
 
+	// Print layer breakdown for latest successful build
+	if len(validResults) > 0 {
+		latest := validResults[0]
+		if len(latest.Layers) > 0 {
+			fmt.Fprintln(w, "\n📦 Layer Breakdown (latest commit):")
+			fmt.Fprintln(w, "-----------------------------------")
+			layerTable := tablewriter.NewWriter(w)
+			layerTable.SetHeader([]string{"#", "Size (MB)", "Command"})
+			layerTable.SetBorder(false)
+			layerTable.SetAutoWrapText(false)
+			layerTable.SetColumnSeparator(" ")
+			layerTable.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
+			layerTable.SetAlignment(tablewriter.ALIGN_LEFT)
+
+			for i, layer := range latest.Layers {
+				layerTable.Append([]string{
+					fmt.Sprintf("%d", i+1),
+					fmt.Sprintf("%.2f", layer.SizeMB),
+					truncate(layer.CreatedBy, 60),
+				})
+			}
+			layerTable.Render()
+		}
+	}
+
 	return nil
 }
 
@@ -395,12 +447,21 @@ func (tm *TimeMachine) generateJSONReport(w io.Writer) error {
 
 // generateCSVReport outputs results as CSV
 func (tm *TimeMachine) generateCSVReport(w io.Writer) error {
-	fmt.Fprintln(w, "commit_hash,date,author,size_bytes,size_diff,layer_count,build_time_seconds,message")
+	// Main results CSV
+	fmt.Fprintln(w, "commit_hash,date,author,size_bytes,size_diff,layer_count,build_time_seconds,message,layer_sizes_mb")
 	for _, result := range tm.results {
 		if result.Error != "" {
 			continue
 		}
-		fmt.Fprintf(w, "%s,%s,%s,%d,%d,%d,%.2f,\"%s\"\n",
+
+		// Format layer sizes as semicolon-separated list
+		var layerSizes []string
+		for _, layer := range result.Layers {
+			layerSizes = append(layerSizes, fmt.Sprintf("%.2f", layer.SizeMB))
+		}
+		layerSizesStr := strings.Join(layerSizes, ";")
+
+		fmt.Fprintf(w, "%s,%s,%s,%d,%d,%d,%.2f,\"%s\",\"%s\"\n",
 			result.CommitHash,
 			result.Date.Format(time.RFC3339),
 			result.Author,
@@ -409,6 +470,7 @@ func (tm *TimeMachine) generateCSVReport(w io.Writer) error {
 			result.LayerCount,
 			result.BuildTime,
 			strings.ReplaceAll(result.CommitMessage, "\"", "\"\""),
+			layerSizesStr,
 		)
 	}
 	return nil
@@ -456,6 +518,27 @@ func (tm *TimeMachine) generateMarkdownReport(w io.Writer) error {
 				r.BuildTime,
 			)
 		}
+
+		// Add layer breakdown for latest commit
+		latest := validResults[0]
+		if len(latest.Layers) > 0 {
+			fmt.Fprintln(w)
+			fmt.Fprintln(w, "## Layer Breakdown (Latest Commit)")
+			fmt.Fprintln(w)
+			fmt.Fprintf(w, "Commit: `%s`\n", latest.CommitHash[:8])
+			fmt.Fprintln(w)
+			fmt.Fprintln(w, "| # | Size (MB) | Command |")
+			fmt.Fprintln(w, "|---|-----------|---------|")
+
+			for i, layer := range latest.Layers {
+				cmd := strings.ReplaceAll(layer.CreatedBy, "|", "\\|")
+				fmt.Fprintf(w, "| %d | %.2f | `%s` |\n",
+					i+1,
+					layer.SizeMB,
+					truncate(cmd, 60),
+				)
+			}
+		}
 	}
 
 	return nil
@@ -484,6 +567,17 @@ func (tm *TimeMachine) generateHTMLChart(w io.Writer) error {
 		layerData = append(layerData, r.LayerCount)
 	}
 
+	// Prepare layer breakdown data for latest commit
+	var layerLabels []string
+	var layerSizes []float64
+	if len(validResults) > 0 && len(validResults[0].Layers) > 0 {
+		for i, layer := range validResults[0].Layers {
+			label := fmt.Sprintf("L%d: %s", i+1, truncate(layer.CreatedBy, 30))
+			layerLabels = append(layerLabels, label)
+			layerSizes = append(layerSizes, layer.SizeMB)
+		}
+	}
+
 	// Generate HTML with Chart.js
 	html := fmt.Sprintf(`<!DOCTYPE html>
 <html>
@@ -499,6 +593,10 @@ func (tm *TimeMachine) generateHTMLChart(w io.Writer) error {
         h1 {
             color: #333;
         }
+        h2 {
+            color: #555;
+            margin-top: 0;
+        }
         .chart-container {
             background: white;
             border-radius: 8px;
@@ -508,6 +606,28 @@ func (tm *TimeMachine) generateHTMLChart(w io.Writer) error {
         }
         canvas {
             max-height: 400px;
+        }
+        .layer-table {
+            width: 100%%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+        .layer-table th, .layer-table td {
+            padding: 10px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+        }
+        .layer-table th {
+            background: #f8f9fa;
+            font-weight: 600;
+        }
+        .layer-table tr:hover {
+            background: #f8f9fa;
+        }
+        .size-bar {
+            background: linear-gradient(90deg, rgba(75, 192, 192, 0.6) 0%%, rgba(75, 192, 192, 0.2) 100%%);
+            height: 20px;
+            border-radius: 4px;
         }
     </style>
 </head>
@@ -529,8 +649,27 @@ func (tm *TimeMachine) generateHTMLChart(w io.Writer) error {
         <canvas id="layerChart"></canvas>
     </div>
 
+    <div class="chart-container">
+        <h2>📦 Layer Size Breakdown (Latest Commit)</h2>
+        <canvas id="layerSizeChart"></canvas>
+        <table class="layer-table" id="layerTable">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Size (MB)</th>
+                    <th>Command</th>
+                    <th>Size</th>
+                </tr>
+            </thead>
+            <tbody id="layerTableBody">
+            </tbody>
+        </table>
+    </div>
+
     <script>
         const labels = %s;
+        const layerLabels = %s;
+        const layerSizes = %s;
         
         // Size Chart
         new Chart(document.getElementById('sizeChart'), {
@@ -542,14 +681,19 @@ func (tm *TimeMachine) generateHTMLChart(w io.Writer) error {
                     data: %s,
                     borderColor: 'rgb(75, 192, 192)',
                     backgroundColor: 'rgba(75, 192, 192, 0.2)',
-                    tension: 0.1
+                    tension: 0.1,
+                    fill: true
                 }]
             },
             options: {
                 responsive: true,
                 scales: {
                     y: {
-                        beginAtZero: true
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Size (MB)'
+                        }
                     }
                 }
             }
@@ -563,7 +707,7 @@ func (tm *TimeMachine) generateHTMLChart(w io.Writer) error {
                 datasets: [{
                     label: 'Build Time (seconds)',
                     data: %s,
-                    backgroundColor: 'rgba(255, 159, 64, 0.2)',
+                    backgroundColor: 'rgba(255, 159, 64, 0.6)',
                     borderColor: 'rgb(255, 159, 64)',
                     borderWidth: 1
                 }]
@@ -572,7 +716,11 @@ func (tm *TimeMachine) generateHTMLChart(w io.Writer) error {
                 responsive: true,
                 scales: {
                     y: {
-                        beginAtZero: true
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Time (seconds)'
+                        }
                     }
                 }
             }
@@ -586,7 +734,7 @@ func (tm *TimeMachine) generateHTMLChart(w io.Writer) error {
                 datasets: [{
                     label: 'Number of Layers',
                     data: %s,
-                    backgroundColor: 'rgba(153, 102, 255, 0.2)',
+                    backgroundColor: 'rgba(153, 102, 255, 0.6)',
                     borderColor: 'rgb(153, 102, 255)',
                     borderWidth: 1
                 }]
@@ -598,15 +746,80 @@ func (tm *TimeMachine) generateHTMLChart(w io.Writer) error {
                         beginAtZero: true,
                         ticks: {
                             stepSize: 1
+                        },
+                        title: {
+                            display: true,
+                            text: 'Layer Count'
                         }
                     }
                 }
             }
         });
+
+        // Layer Size Breakdown Chart (Horizontal Bar)
+        if (layerSizes.length > 0) {
+            new Chart(document.getElementById('layerSizeChart'), {
+                type: 'bar',
+                data: {
+                    labels: layerLabels,
+                    datasets: [{
+                        label: 'Layer Size (MB)',
+                        data: layerSizes,
+                        backgroundColor: layerSizes.map((size, i) => {
+                            const colors = [
+                                'rgba(75, 192, 192, 0.6)',
+                                'rgba(255, 99, 132, 0.6)',
+                                'rgba(255, 206, 86, 0.6)',
+                                'rgba(54, 162, 235, 0.6)',
+                                'rgba(153, 102, 255, 0.6)',
+                                'rgba(255, 159, 64, 0.6)'
+                            ];
+                            return colors[i %% colors.length];
+                        }),
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    },
+                    scales: {
+                        x: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Size (MB)'
+                            }
+                        }
+                    }
+                }
+            });
+
+            // Populate layer table
+            const maxSize = Math.max(...layerSizes);
+            const tbody = document.getElementById('layerTableBody');
+            layerSizes.forEach((size, i) => {
+                const row = document.createElement('tr');
+                const barWidth = (size / maxSize * 100).toFixed(1);
+                row.innerHTML = `+"`"+`
+                    <td>${i + 1}</td>
+                    <td>${size.toFixed(2)}</td>
+                    <td style="max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${layerLabels[i].substring(layerLabels[i].indexOf(':') + 2)}</td>
+                    <td style="width: 200px;"><div class="size-bar" style="width: ${barWidth}%%"></div></td>
+                `+"`"+`;
+                tbody.appendChild(row);
+            });
+        }
     </script>
 </body>
 </html>`,
 		toJSONArray(labels),
+		toJSONArray(layerLabels),
+		toJSONFloatArray(layerSizes),
 		toJSONFloatArray(sizeData),
 		toJSONFloatArray(timeData),
 		toJSONIntArray(layerData),
@@ -650,6 +863,19 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen-3] + "..."
+}
+
+func truncateLayerCommand(cmd string) string {
+	// Clean up the command string - remove /bin/sh -c prefix
+	cmd = strings.TrimPrefix(cmd, "/bin/sh -c ")
+	cmd = strings.TrimPrefix(cmd, "#(nop) ")
+	cmd = strings.TrimSpace(cmd)
+
+	// Truncate if too long
+	if len(cmd) > 80 {
+		return cmd[:77] + "..."
+	}
+	return cmd
 }
 
 func toJSONArray(arr []string) string {
