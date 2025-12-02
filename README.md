@@ -228,7 +228,6 @@ Flags:
 
 - **Build times are indicative only** — They depend on Docker's layer cache state and system load
 - **Commits are analyzed by git parent chain** — Not chronological order by date
-- **Each build uses `--no-cache`** — For consistent size measurements
 - **Temporary images are cleaned up** — Named `dtm-<commit-hash>`
 - **Layer matching uses command string** — Layers are compared by their Dockerfile instruction
 
@@ -260,8 +259,6 @@ dtm analyze --branch main --format json -o main.json
 # Analyze feature branch  
 dtm analyze --branch feature/new-build --format json -o feature.json
 
-# Compare results
-diff main.json feature.json
 ```
 
 ## License
