@@ -52,6 +52,12 @@ type BuildResult struct {
 	SizeDiff      int64       `json:"size_diff,omitempty"`
 }
 
+// LayerComparison represents layer sizes across commits
+type LayerComparison struct {
+	LayerCommand string             `json:"layer_command"`
+	SizeByCommit map[string]float64 `json:"size_by_commit"` // commit hash -> size in MB
+}
+
 // TimeMachine is the main analyzer
 type TimeMachine struct {
 	config  Config
@@ -335,6 +341,61 @@ func (tm *TimeMachine) analyzeCommit(ctx context.Context, commit *object.Commit)
 	return result
 }
 
+// buildLayerComparison builds layer comparison data across commits
+func (tm *TimeMachine) buildLayerComparison(validResults []BuildResult) ([]string, []LayerComparison) {
+	// Collect all unique layer commands across all commits
+	layerCommands := make([]string, 0)
+	layerCommandSet := make(map[string]bool)
+
+	// Use the latest commit's layers as the base order
+	if len(validResults) > 0 {
+		for _, layer := range validResults[0].Layers {
+			if !layerCommandSet[layer.CreatedBy] {
+				layerCommands = append(layerCommands, layer.CreatedBy)
+				layerCommandSet[layer.CreatedBy] = true
+			}
+		}
+	}
+
+	// Add any layers from other commits that aren't in the latest
+	for _, result := range validResults[1:] {
+		for _, layer := range result.Layers {
+			if !layerCommandSet[layer.CreatedBy] {
+				layerCommands = append(layerCommands, layer.CreatedBy)
+				layerCommandSet[layer.CreatedBy] = true
+			}
+		}
+	}
+
+	// Build comparison data
+	comparisons := make([]LayerComparison, 0, len(layerCommands))
+	for _, cmd := range layerCommands {
+		comparison := LayerComparison{
+			LayerCommand: cmd,
+			SizeByCommit: make(map[string]float64),
+		}
+
+		for _, result := range validResults {
+			// Find this layer in the commit
+			found := false
+			for _, layer := range result.Layers {
+				if layer.CreatedBy == cmd {
+					comparison.SizeByCommit[result.CommitHash[:8]] = layer.SizeMB
+					found = true
+					break
+				}
+			}
+			if !found {
+				comparison.SizeByCommit[result.CommitHash[:8]] = -1 // -1 indicates not present
+			}
+		}
+
+		comparisons = append(comparisons, comparison)
+	}
+
+	return layerCommands, comparisons
+}
+
 // GenerateReport generates output in the specified format
 func (tm *TimeMachine) GenerateReport(format string, writer io.Writer) error {
 	switch format {
@@ -410,27 +471,50 @@ func (tm *TimeMachine) generateTableReport(w io.Writer) error {
 		fmt.Fprintf(w, "   Message: %s\n", optimization.CommitMessage)
 	}
 
-	// Print layer breakdown for latest successful build
+	// Print layer comparison across commits
 	if len(validResults) > 0 {
-		latest := validResults[0]
-		if len(latest.Layers) > 0 {
-			fmt.Fprintln(w, "\n📦 Layer Breakdown (latest commit):")
-			fmt.Fprintln(w, "-----------------------------------")
+		layerCommands, _ := tm.buildLayerComparison(validResults)
+
+		if len(layerCommands) > 0 {
+			fmt.Fprintln(w, "\n📦 Layer Size Comparison Across Commits:")
+			fmt.Fprintln(w, "-----------------------------------------")
+
+			// Build header: Layer | commit1 | commit2 | ...
+			header := []string{"Layer"}
+			for _, result := range validResults {
+				header = append(header, result.CommitHash[:8])
+			}
+
 			layerTable := tablewriter.NewWriter(w)
-			layerTable.SetHeader([]string{"#", "Size (MB)", "Command"})
+			layerTable.SetHeader(header)
 			layerTable.SetBorder(false)
 			layerTable.SetAutoWrapText(false)
 			layerTable.SetColumnSeparator(" ")
 			layerTable.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
 			layerTable.SetAlignment(tablewriter.ALIGN_LEFT)
 
-			for i, layer := range latest.Layers {
-				layerTable.Append([]string{
-					fmt.Sprintf("%d", i+1),
-					fmt.Sprintf("%.2f", layer.SizeMB),
-					truncate(layer.CreatedBy, 60),
-				})
+			// For each layer command, show its size in each commit
+			for _, cmd := range layerCommands {
+				row := []string{truncate(cmd, 40)}
+
+				for _, result := range validResults {
+					// Find this layer in the commit
+					found := false
+					for _, layer := range result.Layers {
+						if layer.CreatedBy == cmd {
+							row = append(row, fmt.Sprintf("%.2f", layer.SizeMB))
+							found = true
+							break
+						}
+					}
+					if !found {
+						row = append(row, "-")
+					}
+				}
+
+				layerTable.Append(row)
 			}
+
 			layerTable.Render()
 		}
 	}
@@ -438,41 +522,108 @@ func (tm *TimeMachine) generateTableReport(w io.Writer) error {
 	return nil
 }
 
+// JSONReport is the structure for JSON output
+type JSONReport struct {
+	Results         []BuildResult     `json:"results"`
+	LayerComparison []LayerComparison `json:"layer_comparison"`
+	CommitOrder     []string          `json:"commit_order"`
+}
+
 // generateJSONReport outputs results as JSON
 func (tm *TimeMachine) generateJSONReport(w io.Writer) error {
+	var validResults []BuildResult
+	for _, result := range tm.results {
+		if result.Error == "" {
+			validResults = append(validResults, result)
+		}
+	}
+
+	// Build commit order
+	commitOrder := make([]string, 0, len(validResults))
+	for _, result := range validResults {
+		commitOrder = append(commitOrder, result.CommitHash[:8])
+	}
+
+	// Build layer comparison
+	_, comparisons := tm.buildLayerComparison(validResults)
+
+	report := JSONReport{
+		Results:         tm.results,
+		LayerComparison: comparisons,
+		CommitOrder:     commitOrder,
+	}
+
 	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
-	return encoder.Encode(tm.results)
+	return encoder.Encode(report)
 }
 
 // generateCSVReport outputs results as CSV
 func (tm *TimeMachine) generateCSVReport(w io.Writer) error {
-	// Main results CSV
-	fmt.Fprintln(w, "commit_hash,date,author,size_bytes,size_diff,layer_count,build_time_seconds,message,layer_sizes_mb")
+	var validResults []BuildResult
+	for _, result := range tm.results {
+		if result.Error == "" {
+			validResults = append(validResults, result)
+		}
+	}
+
+	// Part 1: Main results
+	fmt.Fprintln(w, "# Commit Results")
+	fmt.Fprintln(w, "commit,date,author,size_mb,diff_mb,layers,time_s,message")
 	for _, result := range tm.results {
 		if result.Error != "" {
 			continue
 		}
 
-		// Format layer sizes as semicolon-separated list
-		var layerSizes []string
-		for _, layer := range result.Layers {
-			layerSizes = append(layerSizes, fmt.Sprintf("%.2f", layer.SizeMB))
+		diff := ""
+		if result.SizeDiff != 0 {
+			sign := "+"
+			if result.SizeDiff < 0 {
+				sign = ""
+			}
+			diff = fmt.Sprintf("%s%.1f", sign, float64(result.SizeDiff)/1024/1024)
 		}
-		layerSizesStr := strings.Join(layerSizes, ";")
 
-		fmt.Fprintf(w, "%s,%s,%s,%d,%d,%d,%.2f,\"%s\",\"%s\"\n",
-			result.CommitHash,
-			result.Date.Format(time.RFC3339),
+		fmt.Fprintf(w, "%s,%s,%s,%.2f,%s,%d,%.1f,\"%s\"\n",
+			result.CommitHash[:8],
+			result.Date.Format("2006-01-02"),
 			result.Author,
-			result.ImageSize,
-			result.SizeDiff,
+			float64(result.ImageSize)/1024/1024,
+			diff,
 			result.LayerCount,
 			result.BuildTime,
 			strings.ReplaceAll(result.CommitMessage, "\"", "\"\""),
-			layerSizesStr,
 		)
 	}
+
+	// Part 2: Layer comparison
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "# Layer Size Comparison (MB)")
+
+	// Build header
+	header := []string{"layer_command"}
+	for _, result := range validResults {
+		header = append(header, result.CommitHash[:8])
+	}
+	fmt.Fprintln(w, strings.Join(header, ","))
+
+	// Build rows
+	layerCommands, comparisons := tm.buildLayerComparison(validResults)
+	for i, cmd := range layerCommands {
+		row := []string{fmt.Sprintf("\"%s\"", strings.ReplaceAll(cmd, "\"", "\"\""))}
+
+		for _, result := range validResults {
+			size := comparisons[i].SizeByCommit[result.CommitHash[:8]]
+			if size < 0 {
+				row = append(row, "-")
+			} else {
+				row = append(row, fmt.Sprintf("%.2f", size))
+			}
+		}
+
+		fmt.Fprintln(w, strings.Join(row, ","))
+	}
+
 	return nil
 }
 
@@ -501,42 +652,61 @@ func (tm *TimeMachine) generateMarkdownReport(w io.Writer) error {
 
 		fmt.Fprintln(w, "## Details")
 		fmt.Fprintln(w)
-		fmt.Fprintln(w, "| Commit | Date | Size (MB) | Change | Layers | Build Time |")
-		fmt.Fprintln(w, "|--------|------|-----------|--------|--------|------------|")
+		fmt.Fprintln(w, "| Commit | Date | Author | Size (MB) | Diff | Layers | Time (s) | Message |")
+		fmt.Fprintln(w, "|--------|------|--------|-----------|------|--------|----------|---------|")
 
 		for _, r := range validResults {
-			change := ""
+			diff := ""
 			if r.SizeDiff != 0 {
-				change = fmt.Sprintf("%+.1f", float64(r.SizeDiff)/1024/1024)
+				sign := "+"
+				if r.SizeDiff < 0 {
+					sign = ""
+				}
+				diff = fmt.Sprintf("%s%.1f", sign, float64(r.SizeDiff)/1024/1024)
 			}
-			fmt.Fprintf(w, "| %s | %s | %.2f | %s | %d | %.1fs |\n",
+			fmt.Fprintf(w, "| %s | %s | %s | %.2f | %s | %d | %.1f | %s |\n",
 				r.CommitHash[:8],
 				r.Date.Format("2006-01-02"),
+				truncate(r.Author, 12),
 				float64(r.ImageSize)/1024/1024,
-				change,
+				diff,
 				r.LayerCount,
 				r.BuildTime,
+				truncate(r.CommitMessage, 40),
 			)
 		}
 
-		// Add layer breakdown for latest commit
-		latest := validResults[0]
-		if len(latest.Layers) > 0 {
+		// Layer comparison table
+		layerCommands, comparisons := tm.buildLayerComparison(validResults)
+		if len(layerCommands) > 0 {
 			fmt.Fprintln(w)
-			fmt.Fprintln(w, "## Layer Breakdown (Latest Commit)")
+			fmt.Fprintln(w, "## Layer Size Comparison Across Commits")
 			fmt.Fprintln(w)
-			fmt.Fprintf(w, "Commit: `%s`\n", latest.CommitHash[:8])
-			fmt.Fprintln(w)
-			fmt.Fprintln(w, "| # | Size (MB) | Command |")
-			fmt.Fprintln(w, "|---|-----------|---------|")
 
-			for i, layer := range latest.Layers {
-				cmd := strings.ReplaceAll(layer.CreatedBy, "|", "\\|")
-				fmt.Fprintf(w, "| %d | %.2f | `%s` |\n",
-					i+1,
-					layer.SizeMB,
-					truncate(cmd, 60),
-				)
+			// Build header
+			header := "| Layer |"
+			separator := "|-------|"
+			for _, result := range validResults {
+				header += fmt.Sprintf(" %s |", result.CommitHash[:8])
+				separator += "----------|"
+			}
+			fmt.Fprintln(w, header)
+			fmt.Fprintln(w, separator)
+
+			// Build rows
+			for i, cmd := range layerCommands {
+				row := fmt.Sprintf("| `%s` |", truncate(cmd, 40))
+
+				for _, result := range validResults {
+					size := comparisons[i].SizeByCommit[result.CommitHash[:8]]
+					if size < 0 {
+						row += " - |"
+					} else {
+						row += fmt.Sprintf(" %.2f |", size)
+					}
+				}
+
+				fmt.Fprintln(w, row)
 			}
 		}
 	}
