@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/jtodic/docker-time-machine/pkg/analyzer"
 	"github.com/spf13/cobra"
@@ -70,7 +71,7 @@ func init() {
 	analyzeCmd.Flags().StringVarP(&analyzeFlags.format, "format", "f", "table", "Output format: table, json, csv, chart, markdown")
 	analyzeCmd.Flags().IntVarP(&analyzeFlags.maxCommits, "max-commits", "n", 20, "Maximum commits to analyze (0 = all)")
 	analyzeCmd.Flags().StringVarP(&analyzeFlags.branch, "branch", "b", "", "Git branch to analyze (default: current branch)")
-	analyzeCmd.Flags().StringVarP(&analyzeFlags.output, "output", "o", "", "Output file path (default: stdout)")
+	analyzeCmd.Flags().StringVarP(&analyzeFlags.output, "output", "o", "", "Output file path (default: stdout for table/json/csv/markdown, auto-generated timestamped file for chart)")
 	analyzeCmd.Flags().StringVar(&analyzeFlags.since, "since", "", "Analyze commits since date (YYYY-MM-DD)")
 	analyzeCmd.Flags().StringVar(&analyzeFlags.until, "until", "", "Analyze commits until date (YYYY-MM-DD)")
 	analyzeCmd.Flags().BoolVar(&analyzeFlags.skipFailed, "skip-failed", false, "Skip commits that fail to build")
@@ -119,7 +120,20 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 		}
 		defer output.Close()
 	} else {
-		output = os.Stdout
+		// If format is chart and no output specified, create timestamped filename
+		if analyzeFlags.format == "chart" {
+			timestamp := time.Now().Format("2006-01-02-150405")
+			filename := fmt.Sprintf("report-%s.html", timestamp)
+			var err error
+			output, err = os.Create(filename)
+			if err != nil {
+				return fmt.Errorf("failed to create output file: %w", err)
+			}
+			defer output.Close()
+			analyzeFlags.output = filename // Store for the success message
+		} else {
+			output = os.Stdout
+		}
 	}
 
 	// Generate report
