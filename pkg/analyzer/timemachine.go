@@ -728,25 +728,74 @@ func (tm *TimeMachine) generateHTMLChart(w io.Writer) error {
 	var labels []string
 	var sizeData []float64
 	var timeData []float64
-	var layerData []int
 
 	for _, r := range validResults {
 		labels = append(labels, r.CommitHash[:8])
 		sizeData = append(sizeData, float64(r.ImageSize)/1024/1024)
 		timeData = append(timeData, r.BuildTime)
-		layerData = append(layerData, r.LayerCount)
 	}
 
-	// Prepare layer breakdown data for latest commit
-	var layerLabels []string
-	var layerSizes []float64
-	if len(validResults) > 0 && len(validResults[0].Layers) > 0 {
-		for i, layer := range validResults[0].Layers {
-			label := fmt.Sprintf("L%d: %s", i+1, truncate(layer.CreatedBy, 30))
-			layerLabels = append(layerLabels, label)
-			layerSizes = append(layerSizes, layer.SizeMB)
-		}
+	// Build layer comparison data for stacked chart
+	layerCommands, comparisons := tm.buildLayerComparison(validResults)
+
+	// Prepare stacked layer data - each layer becomes a dataset
+	type LayerDataset struct {
+		Label           string    `json:"label"`
+		Data            []float64 `json:"data"`
+		BackgroundColor string    `json:"backgroundColor"`
 	}
+
+	colors := []string{
+		"rgba(75, 192, 192, 0.8)",
+		"rgba(255, 99, 132, 0.8)",
+		"rgba(255, 206, 86, 0.8)",
+		"rgba(54, 162, 235, 0.8)",
+		"rgba(153, 102, 255, 0.8)",
+		"rgba(255, 159, 64, 0.8)",
+		"rgba(199, 199, 199, 0.8)",
+		"rgba(83, 102, 255, 0.8)",
+		"rgba(255, 99, 255, 0.8)",
+		"rgba(99, 255, 132, 0.8)",
+	}
+
+	var stackedDatasets []LayerDataset
+	for i, cmd := range layerCommands {
+		dataset := LayerDataset{
+			Label:           truncate(cmd, 50),
+			Data:            make([]float64, len(validResults)),
+			BackgroundColor: colors[i%len(colors)],
+		}
+
+		for j, result := range validResults {
+			size := comparisons[i].SizeByCommit[result.CommitHash[:8]]
+			if size < 0 {
+				dataset.Data[j] = 0
+			} else {
+				dataset.Data[j] = size
+			}
+		}
+
+		stackedDatasets = append(stackedDatasets, dataset)
+	}
+
+	// Convert stacked datasets to JSON
+	stackedDatasetsJSON, _ := json.Marshal(stackedDatasets)
+
+	// Build layer comparison table data for HTML
+	type LayerTableRow struct {
+		Command string             `json:"command"`
+		Sizes   map[string]float64 `json:"sizes"`
+	}
+
+	var layerTableData []LayerTableRow
+	for i, cmd := range layerCommands {
+		row := LayerTableRow{
+			Command: cmd,
+			Sizes:   comparisons[i].SizeByCommit,
+		}
+		layerTableData = append(layerTableData, row)
+	}
+	layerTableJSON, _ := json.Marshal(layerTableData)
 
 	// Generate HTML with Chart.js
 	html := fmt.Sprintf(`<!DOCTYPE html>
@@ -756,16 +805,20 @@ func (tm *TimeMachine) generateHTMLChart(w io.Writer) error {
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         body {
-            font-family: Arial, sans-serif;
-            margin: 20px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            margin: 0;
+            padding: 20px;
             background: #f5f5f5;
+            color: #333;
         }
         h1 {
             color: #333;
+            margin-bottom: 30px;
         }
         h2 {
             color: #555;
             margin-top: 0;
+            font-size: 1.2em;
         }
         .chart-container {
             background: white;
@@ -777,27 +830,61 @@ func (tm *TimeMachine) generateHTMLChart(w io.Writer) error {
         canvas {
             max-height: 400px;
         }
+        .note {
+            font-size: 0.85em;
+            color: #666;
+            font-style: italic;
+            margin-top: 10px;
+        }
+        .layer-table-container {
+            overflow-x: auto;
+        }
         .layer-table {
             width: 100%%;
             border-collapse: collapse;
             margin-top: 15px;
+            font-size: 0.9em;
         }
         .layer-table th, .layer-table td {
-            padding: 10px;
+            padding: 10px 12px;
             text-align: left;
             border-bottom: 1px solid #eee;
+            white-space: nowrap;
         }
         .layer-table th {
             background: #f8f9fa;
             font-weight: 600;
+            position: sticky;
+            top: 0;
         }
-        .layer-table tr:hover {
+        .layer-table th:first-child {
+            position: sticky;
+            left: 0;
+            z-index: 2;
             background: #f8f9fa;
         }
-        .size-bar {
-            background: linear-gradient(90deg, rgba(75, 192, 192, 0.6) 0%%, rgba(75, 192, 192, 0.2) 100%%);
-            height: 20px;
-            border-radius: 4px;
+        .layer-table td:first-child {
+            position: sticky;
+            left: 0;
+            background: white;
+            max-width: 300px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 0.85em;
+        }
+        .layer-table tr:hover td {
+            background: #f8f9fa;
+        }
+        .layer-table tr:hover td:first-child {
+            background: #f0f0f0;
+        }
+        .size-cell {
+            text-align: right;
+            font-family: 'Monaco', 'Menlo', monospace;
+        }
+        .size-cell.missing {
+            color: #999;
         }
     </style>
 </head>
@@ -805,60 +892,123 @@ func (tm *TimeMachine) generateHTMLChart(w io.Writer) error {
     <h1>🐳 Docker Image Evolution Report</h1>
     
     <div class="chart-container">
-        <h2>Image Size Over Time</h2>
+        <h2>📈 Image Size Over Time</h2>
         <canvas id="sizeChart"></canvas>
     </div>
     
     <div class="chart-container">
-        <h2>Build Time Analysis</h2>
-        <canvas id="timeChart"></canvas>
+        <h2>📊 Image Size by Layer</h2>
+        <canvas id="stackedLayerChart"></canvas>
+        <p class="note">Each color represents a different layer. Hover over bars to see layer details.</p>
     </div>
     
     <div class="chart-container">
-        <h2>Layer Count Evolution</h2>
-        <canvas id="layerChart"></canvas>
+        <h2>⏱️ Build Time Analysis</h2>
+        <canvas id="timeChart"></canvas>
+        <p class="note">Build times are indicative only — they depend on Docker's layer cache state and system load at the time of analysis.</p>
     </div>
 
     <div class="chart-container">
-        <h2>📦 Layer Size Breakdown (Latest Commit)</h2>
-        <canvas id="layerSizeChart"></canvas>
-        <table class="layer-table" id="layerTable">
-            <thead>
-                <tr>
-                    <th>#</th>
-                    <th>Size (MB)</th>
-                    <th>Command</th>
-                    <th>Size</th>
-                </tr>
-            </thead>
-            <tbody id="layerTableBody">
-            </tbody>
-        </table>
+        <h2>📦 Layer Size Comparison Across Commits</h2>
+        <div class="layer-table-container">
+            <table class="layer-table" id="layerComparisonTable">
+                <thead>
+                    <tr id="layerTableHeader">
+                        <th>Layer Command</th>
+                    </tr>
+                </thead>
+                <tbody id="layerTableBody">
+                </tbody>
+            </table>
+        </div>
     </div>
 
     <script>
         const labels = %s;
-        const layerLabels = %s;
-        const layerSizes = %s;
+        const sizeData = %s;
+        const timeData = %s;
+        const stackedDatasets = %s;
+        const layerTableData = %s;
         
-        // Size Chart
+        // Image Size Over Time Chart
         new Chart(document.getElementById('sizeChart'), {
             type: 'line',
             data: {
                 labels: labels,
                 datasets: [{
                     label: 'Image Size (MB)',
-                    data: %s,
+                    data: sizeData,
                     borderColor: 'rgb(75, 192, 192)',
                     backgroundColor: 'rgba(75, 192, 192, 0.2)',
                     tension: 0.1,
-                    fill: true
+                    fill: true,
+                    pointRadius: 4,
+                    pointHoverRadius: 6
                 }]
             },
             options: {
                 responsive: true,
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                },
                 scales: {
                     y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Size (MB)'
+                        }
+                    },
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Commit'
+                        }
+                    }
+                }
+            }
+        });
+
+        // Stacked Layer Chart
+        new Chart(document.getElementById('stackedLayerChart'), {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: stackedDatasets
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: 'bottom',
+                        labels: {
+                            boxWidth: 12,
+                            font: {
+                                size: 10
+                            }
+                        }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return context.dataset.label + ': ' + context.raw.toFixed(2) + ' MB';
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        stacked: true,
+                        title: {
+                            display: true,
+                            text: 'Commit'
+                        }
+                    },
+                    y: {
+                        stacked: true,
                         beginAtZero: true,
                         title: {
                             display: true,
@@ -876,7 +1026,7 @@ func (tm *TimeMachine) generateHTMLChart(w io.Writer) error {
                 labels: labels,
                 datasets: [{
                     label: 'Build Time (seconds)',
-                    data: %s,
+                    data: timeData,
                     backgroundColor: 'rgba(255, 159, 64, 0.6)',
                     borderColor: 'rgb(255, 159, 64)',
                     borderWidth: 1
@@ -884,6 +1034,11 @@ func (tm *TimeMachine) generateHTMLChart(w io.Writer) error {
             },
             options: {
                 responsive: true,
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                },
                 scales: {
                     y: {
                         beginAtZero: true,
@@ -891,108 +1046,63 @@ func (tm *TimeMachine) generateHTMLChart(w io.Writer) error {
                             display: true,
                             text: 'Time (seconds)'
                         }
-                    }
-                }
-            }
-        });
-        
-        // Layer Count Chart
-        new Chart(document.getElementById('layerChart'), {
-            type: 'bar',
-            data: {
-                labels: labels,
-                datasets: [{
-                    label: 'Number of Layers',
-                    data: %s,
-                    backgroundColor: 'rgba(153, 102, 255, 0.6)',
-                    borderColor: 'rgb(153, 102, 255)',
-                    borderWidth: 1
-                }]
-            },
-            options: {
-                responsive: true,
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        ticks: {
-                            stepSize: 1
-                        },
+                    },
+                    x: {
                         title: {
                             display: true,
-                            text: 'Layer Count'
+                            text: 'Commit'
                         }
                     }
                 }
             }
         });
 
-        // Layer Size Breakdown Chart (Horizontal Bar)
-        if (layerSizes.length > 0) {
-            new Chart(document.getElementById('layerSizeChart'), {
-                type: 'bar',
-                data: {
-                    labels: layerLabels,
-                    datasets: [{
-                        label: 'Layer Size (MB)',
-                        data: layerSizes,
-                        backgroundColor: layerSizes.map((size, i) => {
-                            const colors = [
-                                'rgba(75, 192, 192, 0.6)',
-                                'rgba(255, 99, 132, 0.6)',
-                                'rgba(255, 206, 86, 0.6)',
-                                'rgba(54, 162, 235, 0.6)',
-                                'rgba(153, 102, 255, 0.6)',
-                                'rgba(255, 159, 64, 0.6)'
-                            ];
-                            return colors[i %% colors.length];
-                        }),
-                        borderWidth: 1
-                    }]
-                },
-                options: {
-                    indexAxis: 'y',
-                    responsive: true,
-                    plugins: {
-                        legend: {
-                            display: false
-                        }
-                    },
-                    scales: {
-                        x: {
-                            beginAtZero: true,
-                            title: {
-                                display: true,
-                                text: 'Size (MB)'
-                            }
-                        }
-                    }
+        // Populate layer comparison table
+        const headerRow = document.getElementById('layerTableHeader');
+        const tbody = document.getElementById('layerTableBody');
+
+        // Add commit columns to header
+        labels.forEach(commit => {
+            const th = document.createElement('th');
+            th.textContent = commit;
+            th.style.textAlign = 'right';
+            headerRow.appendChild(th);
+        });
+
+        // Add rows for each layer
+        layerTableData.forEach(layer => {
+            const row = document.createElement('tr');
+            
+            // Layer command cell
+            const cmdCell = document.createElement('td');
+            cmdCell.textContent = layer.command;
+            cmdCell.title = layer.command;
+            row.appendChild(cmdCell);
+
+            // Size cells for each commit
+            labels.forEach(commit => {
+                const cell = document.createElement('td');
+                cell.className = 'size-cell';
+                const size = layer.sizes[commit];
+                if (size === undefined || size < 0) {
+                    cell.textContent = '-';
+                    cell.classList.add('missing');
+                } else {
+                    cell.textContent = size.toFixed(2);
                 }
+                row.appendChild(cell);
             });
 
-            // Populate layer table
-            const maxSize = Math.max(...layerSizes);
-            const tbody = document.getElementById('layerTableBody');
-            layerSizes.forEach((size, i) => {
-                const row = document.createElement('tr');
-                const barWidth = (size / maxSize * 100).toFixed(1);
-                row.innerHTML = `+"`"+`
-                    <td>${i + 1}</td>
-                    <td>${size.toFixed(2)}</td>
-                    <td style="max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${layerLabels[i].substring(layerLabels[i].indexOf(':') + 2)}</td>
-                    <td style="width: 200px;"><div class="size-bar" style="width: ${barWidth}%%"></div></td>
-                `+"`"+`;
-                tbody.appendChild(row);
-            });
-        }
+            tbody.appendChild(row);
+        });
     </script>
 </body>
 </html>`,
 		toJSONArray(labels),
-		toJSONArray(layerLabels),
-		toJSONFloatArray(layerSizes),
 		toJSONFloatArray(sizeData),
 		toJSONFloatArray(timeData),
-		toJSONIntArray(layerData),
+		string(stackedDatasetsJSON),
+		string(layerTableJSON),
 	)
 
 	_, err := w.Write([]byte(html))

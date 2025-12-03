@@ -2,6 +2,10 @@
 
 Track your Docker image evolution through git history. Find bloat, optimize builds, and understand how your images changed over time.
 
+## ⚡ Fast Analysis with Layer Caching
+
+DTM leverages Docker's intelligent layer caching to analyze your image history **blazingly fast**. Unchanged layers are reused across builds, so you only pay the build cost for layers that actually changed. Analyzing 20+ commits typically takes just minutes, not hours.
+
 ## What It Does
 
 DTM walks through your git history, builds the Docker image at each commit, and records key metrics:
@@ -17,7 +21,8 @@ It then generates reports showing trends, comparing layers across commits, and h
 
 - 📊 **Track image size changes** across commits
 - 📦 **Layer-by-layer comparison** — see which layers changed between commits
-- ⚡ **Monitor build performance** trends
+- 📈 **Stacked layer visualization** — see how each layer contributes to total image size over time
+- ⚡ **Fast builds** — leverages Docker layer caching for rapid analysis
 - 🔍 **Find bloat** — automatically identifies the commit with the biggest size increase
 - ✅ **Find optimizations** — identifies commits that reduced image size
 - 📈 **Multiple output formats** — table, JSON, CSV, Markdown, interactive HTML charts
@@ -190,10 +195,10 @@ dtm analyze -n 5 -v
 ### HTML Chart Output
 
 Generates an interactive report with:
-- 📈 Image size trend over time
-- ⏱️ Build time analysis  
-- 📊 Layer count evolution
-- 📦 Layer size breakdown chart and table
+- 📈 **Image size trend over time** — line chart showing total image size evolution
+- 📊 **Image size by layer** — stacked bar chart showing how each layer contributes to total size across commits
+- ⏱️ **Build time analysis** — bar chart with note that times are indicative only
+- 📦 **Layer size comparison table** — detailed table comparing layer sizes across all commits
 
 ## Command Reference
 
@@ -218,7 +223,7 @@ Flags:
 
 1. **Reads git history** — Gets commits from the specified branch
 2. **Checks out each commit** — Temporarily switches to each commit
-3. **Builds the Docker image** — Using `docker build` with no cache
+3. **Builds the Docker image** — Using `docker build` (layer cache makes this fast!)
 4. **Records metrics** — Image size, layer info, build time
 5. **Cleans up** — Removes temporary images
 6. **Restores branch** — Returns to original branch/commit
@@ -258,7 +263,6 @@ dtm analyze --branch main --format json -o main.json
 
 # Analyze feature branch  
 dtm analyze --branch feature/new-build --format json -o feature.json
-
 ```
 
 ## License
