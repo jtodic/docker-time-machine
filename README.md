@@ -146,9 +146,9 @@ Generates an interactive report with:
 - ⏱️ **Build time analysis** — bar chart with note that times are indicative only
 - 📦 **Layer size comparison table** — detailed table comparing layer sizes across all commits
 
-![Example Image1](images\example1.png)
+![Example Image1](images/example1.png)
 
-![Example Image2](images\example2.png)
+![Example Image2](images/example2.png)
 
 ### Table Output
 
