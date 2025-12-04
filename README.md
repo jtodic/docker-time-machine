@@ -138,30 +138,42 @@ dtm analyze -n 5 -v
 
 ## Output Examples
 
+### HTML Chart Output
+
+Generates an interactive report with:
+- 📈 **Image size trend over time** — line chart showing total image size evolution
+- 📊 **Image size by layer** — stacked bar chart showing how each layer contributes to total size across commits
+- ⏱️ **Build time analysis** — bar chart with note that times are indicative only
+- 📦 **Layer size comparison table** — detailed table comparing layer sizes across all commits
+
+![Example Image1](images\example1.png)
+
+![Example Image2](images\example2.png)
+
 ### Table Output
 
 ```
 📊 Docker Image Evolution Report
 =================================
- COMMIT     DATE         AUTHOR       SIZE (MB)  DIFF    LAYERS  TIME (S)  MESSAGE
- c5c65db7   2025-11-27   Josko        6.84               3       2.7       test
- 35287b4b   2025-02-14   Natanael     6.84       +0.0    3       2.5       remove template
- 66dcff23   2025-02-14   Natanael     6.84       +0.0    3       2.5       Revert "add loongarch64"
+  COMMIT     DATE         AUTHOR         SIZE (MB)   DIFF   LAYERS   TIME (S)   MESSAGE
+-----------+------------+--------------+-----------+------+--------+----------+------------------------------------
+  35287b4b   2025-02-14   Natanael ...   6.84               3        2.8        also remove github issue template
+  66dcff23   2025-02-14   Natanael ...   6.84               3        2.7        Revert "add loongarch64"
+  b62aa761   2024-05-10   fossdd         6.84        +0.0   3        2.6        github: add issue templates
 
-⚠️  Biggest size increase: a1b2c3d4
-   Size increased by: 12.50 MB
-   Message: Add node_modules to image
-
-✅ Biggest size reduction: e5f6g7h8
-   Size reduced by: 8.20 MB
-   Message: Switch to alpine base
+⚠️  Biggest size increase: b62aa761
+   Size increased by: 0.00 MB
+   Message: github: add issue templates
 
 📦 Layer Size Comparison Across Commits:
 -----------------------------------------
- LAYER                                     c5c65db7  35287b4b  66dcff23
- COPY file:e53e22235bc8d5dab61245a70...    0.00      0.00      0.00
- apk add --no-cache lua5.3 lua-files...    1.55      1.55      1.55
- ADD file:b308dfeecaa300a430b4e65e31...    5.29      5.29      5.29
+  LAYER                                      35287B4B   66DCFF23   B62AA761
+-------------------------------------------+----------+----------+-----------
+  COPY file:e53e22235bc8d5dab61245a702f...   0.00       0.00       -
+  apk add --no-cache lua5.3 lua-filesys...   1.55       1.55       1.55
+  ADD file:b308dfeecaa300a430b4e65e312a...   5.29       5.29       5.29
+  COPY file:67850e59ee891d256d4de67a5f0...   -          -          0.00
+
 ```
 
 ### JSON Output
@@ -170,40 +182,35 @@ dtm analyze -n 5 -v
 {
   "results": [
     {
-      "commit_hash": "c5c65db7...",
-      "commit_message": "test",
-      "author": "Josko",
-      "date": "2025-11-27T10:30:00Z",
-      "image_size": 7172874,
-      "build_time_seconds": 2.7,
+      "commit_hash": "35287b4b8b1be91d683c2f9fa54cf509d9115483",
+      "commit_message": "also remove github issue template",
+      "author": "Natanael T04:16:21+01:00",
+      "image_size": 7176915,
+      "build_time_seconds": 3.2009856,
       "layer_count": 3,
       "layers": [
-        {"created_by": "ADD file:b308...", "size_mb": 5.29},
-        {"created_by": "apk add --no-cache lua5.3...", "size_mb": 1.55}
+        {
+          "id": "sha256:fe57c5ac8025eb268baa5dd02617027564bd9c33bc2c1e30331ba63f32026305",
+          "created_by": "COPY file:e53e22235bc8d5dab61245a702fa2cdd6971233f1cc227a20bd074ab22e900ad in...",
+          "size": 3896,
+          "size_mb": 0.00371551513671875
+        },
+        {
+          "id": "sha256:757ca765a193b01fdb5bb353b8dcf056dade6dfd2630502c9fd914b1623afe8b",
+          "created_by": "apk add --no-cache lua5.3 lua-filesystem lua-lyaml lua-http",
+          "size": 1628314,
+          "size_mb": 1.5528812408447266
+        },
+        {
+          "id": "sha256:86c72bcabfcfb4f4d4bcfea556cac1efde6249771ae9767df79da10accbdasdas",
+          "created_by": "ADD file:b308dfeecaa300a430b4e65e312a48eb5f191df7754e93ff4e7b2d04016b3ca7 in /",
+          "size": 5544705,
+          "size_mb": 5.287842750549316
+        }
       ]
-    }
-  ],
-  "layer_comparison": [
-    {
-      "layer_command": "apk add --no-cache lua5.3...",
-      "size_by_commit": {
-        "c5c65db7": 1.55,
-        "35287b4b": 1.55,
-        "66dcff23": -1
-      }
-    }
-  ],
-  "commit_order": ["c5c65db7", "35287b4b", "66dcff23"]
-}
+    },
+
 ```
-
-### HTML Chart Output
-
-Generates an interactive report with:
-- 📈 **Image size trend over time** — line chart showing total image size evolution
-- 📊 **Image size by layer** — stacked bar chart showing how each layer contributes to total size across commits
-- ⏱️ **Build time analysis** — bar chart with note that times are indicative only
-- 📦 **Layer size comparison table** — detailed table comparing layer sizes across all commits
 
 ## Command Reference
 
