@@ -1,7 +1,5 @@
-.PHONY: build run test clean install docker-build docker-run help
+.PHONY: build run test clean install help
 
-VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
-LDFLAGS := -ldflags "-X main.Version=$(VERSION) -s -w"
 BINARY := dtm
 
 ## help: Show this help message
@@ -14,7 +12,7 @@ help:
 ## build: Build the binary
 build:
 	@echo "Building $(BINARY)..."
-	@go build $(LDFLAGS) -o bin/$(BINARY) main.go
+	@go build -o bin/$(BINARY) main.go
 	@echo "Binary built at bin/$(BINARY)"
 
 ## run: Build and run
@@ -34,7 +32,7 @@ clean:
 ## install: Install binary to GOPATH
 install:
 	@echo "Building $(BINARY)..."
-	@go build $(LDFLAGS) -o $(BINARY) main.go
+	@go build -o $(BINARY) main.go
 	@if [ -z "$(GOPATH)" ]; then \
 		echo "Error: GOPATH is not set"; \
 		exit 1; \
@@ -43,15 +41,3 @@ install:
 	@mv $(BINARY) $(GOPATH)/bin/$(BINARY)
 	@echo "Installed to $(GOPATH)/bin/$(BINARY)"
 	@which $(BINARY) || echo "Note: Make sure $(GOPATH)/bin is in your PATH"
-
-## docker-build: Build Docker image
-docker-build:
-	@docker build -t dtm:latest .
-
-## docker-run: Run via Docker
-docker-run: docker-build
-	@docker run --rm \
-		-v /var/run/docker.sock:/var/run/docker.sock \
-		-v $(PWD):/workspace \
-		-w /workspace \
-		dtm:latest analyze

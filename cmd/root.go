@@ -43,7 +43,7 @@ Getting started:
 
   # Export to JSON for further processing
   dtm analyze --format json --output metrics.json`,
-	Version: "1.0.0",
+	Version: "0.2.0",
 }
 
 func Execute() {

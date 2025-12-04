@@ -39,6 +39,11 @@ make build
 make install
 ```
 
+> **Windows users:** The Makefile uses Unix commands. Use [WSL](https://docs.microsoft.com/en-us/windows/wsl/install) or [Git Bash](https://gitforwindows.org/) to build, or run Go commands directly:
+> ```bash
+> go build -o dtm.exe main.go
+> ```
+
 ### Prerequisites
 
 - Go 1.24+
