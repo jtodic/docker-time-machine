@@ -57,7 +57,7 @@ func (b *Builder) BuildImage(ctx context.Context, contextPath, dockerfileName, t
 		Remove:         true,
 		ForceRemove:    true,
 		PullParent:     false,
-		NoCache:        true,
+		NoCache:        false,
 		SuppressOutput: false,
 		Context:        buildContext,
 	}
