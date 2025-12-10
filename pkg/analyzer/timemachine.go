@@ -1150,11 +1150,6 @@ func truncateLayerCommand(cmd string) string {
 	cmd = strings.TrimPrefix(cmd, "/bin/sh -c ")
 	cmd = strings.TrimPrefix(cmd, "#(nop) ")
 	cmd = strings.TrimSpace(cmd)
-
-	// Truncate if too long
-	if len(cmd) > 80 {
-		return cmd[:77] + "..."
-	}
 	return cmd
 }
 
