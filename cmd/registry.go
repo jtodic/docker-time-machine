@@ -290,9 +290,8 @@ func analyzeRegistryImage(ctx context.Context, cli *client.Client, imageName, ta
 	history, err := cli.ImageHistory(ctx, fullRef)
 	if err == nil {
 		for _, layer := range history {
-			if layer.Size == 0 {
-				continue
-			}
+			// Include all layers, even empty ones (Size == 0)
+			// Empty layers will show as "0.00", missing layers will show as "-"
 			info := LayerInfo{
 				CreatedBy: cleanLayerCmd(layer.CreatedBy),
 				Size:      layer.Size,
@@ -929,37 +928,61 @@ func generateRegistryChartReport(w io.Writer, results []RegistryResult, imageNam
             border-collapse: collapse;
             margin-top: 15px;
             font-size: 0.9em;
+            table-layout: fixed;
         }
         .layer-table th, .layer-table td {
             padding: 10px 12px;
             text-align: left;
             border-bottom: 1px solid #eee;
-            white-space: nowrap;
         }
         .layer-table th {
             background: #f8f9fa;
             font-weight: 600;
             position: sticky;
             top: 0;
+            white-space: nowrap;
         }
         .layer-table th:first-child {
             position: sticky;
             left: 0;
             z-index: 2;
             background: #f8f9fa;
+            min-width: 400px;
+            width: 400px;
         }
         .layer-table td:first-child {
             position: sticky;
             left: 0;
             background: white;
-            max-width: 300px;
-            overflow: hidden;
-            text-overflow: ellipsis;
+            min-width: 400px;
+            max-width: 400px;
+            width: 400px;
             font-family: 'Monaco', 'Menlo', monospace;
             font-size: 0.85em;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            cursor: help;
+        }
+        .layer-table td:first-child:hover {
+            white-space: normal;
+            word-break: break-all;
+            overflow: visible;
+            position: sticky;
+            left: 0;
+            z-index: 10;
+            background: #ffffcc;
+            box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
+        }
+        .layer-table th:not(:first-child),
+        .layer-table td:not(:first-child) {
+            min-width: 100px;
+            text-align: right;
+            white-space: nowrap;
         }
         .layer-table tr:hover td { background: #f8f9fa; }
         .layer-table tr:hover td:first-child { background: #f0f0f0; }
+        .layer-table tr:hover td:first-child:hover { background: #ffffcc; }
         .size-cell { text-align: right; font-family: 'Monaco', 'Menlo', monospace; }
         .size-cell.missing { color: #999; }
     </style>
