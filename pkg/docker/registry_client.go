@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -28,7 +29,8 @@ type TagInfo struct {
 
 // DockerConfig represents ~/.docker/config.json structure
 type DockerConfig struct {
-	Auths map[string]DockerAuthEntry `json:"auths"`
+	Auths      map[string]DockerAuthEntry `json:"auths"`
+	CredsStore string                     `json:"credsStore,omitempty"`
 }
 
 // DockerAuthEntry represents a single auth entry
@@ -45,7 +47,7 @@ func NewRegistryClient() *RegistryClient {
 	}
 }
 
-// getDockerCredentials reads credentials from ~/.docker/config.json
+// getDockerCredentials reads credentials from ~/.docker/config.json or credential helper
 func (rc *RegistryClient) getDockerCredentials(registry string) (username, password string, err error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -63,12 +65,54 @@ func (rc *RegistryClient) getDockerCredentials(registry string) (username, passw
 		return "", "", fmt.Errorf("cannot parse docker config: %w", err)
 	}
 
-	// Try exact match first
-	auth, ok := config.Auths[registry]
-	if !ok {
-		// Try with https://
-		auth, ok = config.Auths["https://"+registry]
+	// Determine which registry key to look for
+	registryKey := registry
+
+	// For Docker Hub, try common variations
+	dockerHubKeys := []string{}
+	if registry == "docker.io" || registry == "" {
+		dockerHubKeys = []string{
+			"https://index.docker.io/v1/",
+			"index.docker.io",
+			"https://index.docker.io/v2/",
+			"registry-1.docker.io",
+			"https://registry-1.docker.io",
+		}
 	}
+
+	// Check if credential helper is configured
+	if config.CredsStore != "" {
+		// Try to get credentials from credential helper
+		keysToTry := []string{registryKey, "https://" + registryKey}
+		keysToTry = append(keysToTry, dockerHubKeys...)
+
+		for _, key := range keysToTry {
+			u, p, err := rc.getCredentialsFromHelper(config.CredsStore, key)
+			if err == nil && u != "" {
+				return u, p, nil
+			}
+		}
+
+		return "", "", fmt.Errorf("no credentials found in %s credential helper for %s - run 'docker login %s' first", config.CredsStore, registry, registry)
+	}
+
+	// Try to find credentials in auths
+	auth, ok := config.Auths[registryKey]
+	if !ok {
+		auth, ok = config.Auths["https://"+registryKey]
+	}
+
+	// For Docker Hub, try common variations
+	if !ok && len(dockerHubKeys) > 0 {
+		for _, key := range dockerHubKeys {
+			if a, found := config.Auths[key]; found && a.Auth != "" {
+				auth = a
+				ok = true
+				break
+			}
+		}
+	}
+
 	if !ok {
 		// Try without port for jfrog
 		if strings.Contains(registry, ".jfrog.io") {
@@ -100,6 +144,31 @@ func (rc *RegistryClient) getDockerCredentials(registry string) (username, passw
 	return parts[0], parts[1], nil
 }
 
+// getCredentialsFromHelper retrieves credentials from a Docker credential helper
+func (rc *RegistryClient) getCredentialsFromHelper(helper, registry string) (username, password string, err error) {
+	// Docker credential helpers are named docker-credential-<helper>
+	helperCmd := "docker-credential-" + helper
+
+	cmd := exec.Command(helperCmd, "get")
+	cmd.Stdin = strings.NewReader(registry)
+
+	output, err := cmd.Output()
+	if err != nil {
+		return "", "", fmt.Errorf("credential helper failed: %w", err)
+	}
+
+	var creds struct {
+		Username string `json:"Username"`
+		Secret   string `json:"Secret"`
+	}
+
+	if err := json.Unmarshal(output, &creds); err != nil {
+		return "", "", fmt.Errorf("cannot parse credential helper output: %w", err)
+	}
+
+	return creds.Username, creds.Secret, nil
+}
+
 // ListTags lists tags for an image from the registry
 func (rc *RegistryClient) ListTags(ctx context.Context, imageName string, limit int) ([]TagInfo, error) {
 	// Parse image name to determine registry
@@ -125,6 +194,10 @@ func (rc *RegistryClient) ListTags(ctx context.Context, imageName string, limit 
 }
 
 func parseImageName(imageName string) (registry, repo string) {
+	// Strip protocol prefix if present
+	imageName = strings.TrimPrefix(imageName, "https://")
+	imageName = strings.TrimPrefix(imageName, "http://")
+
 	parts := strings.SplitN(imageName, "/", 2)
 
 	// Check if first part looks like a registry

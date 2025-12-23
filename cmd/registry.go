@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -138,7 +139,7 @@ func runRegistry(cmd *cobra.Command, args []string) error {
 
 	var results []RegistryResult
 	var errorCount int
-	for i, tag := range tags {
+	for _, tag := range tags {
 		bar.Add(1)
 
 		result := analyzeRegistryImageMetadata(ctx, regClient, imageName, tag)
@@ -147,13 +148,6 @@ func runRegistry(cmd *cobra.Command, args []string) error {
 			errorCount++
 			if verbose {
 				fmt.Fprintf(os.Stderr, "\n  ⚠️ %s: %s\n", tag, result.Error)
-			}
-		} else if i > 0 {
-			for j := i - 1; j >= 0; j-- {
-				if results[j].Error == "" {
-					result.SizeDiff = result.Size - results[j].Size
-					break
-				}
 			}
 		}
 
@@ -173,6 +167,33 @@ func runRegistry(cmd *cobra.Command, args []string) error {
 
 	if successCount == 0 {
 		return fmt.Errorf("all %d tags failed to fetch metadata - check network or authentication", len(results))
+	}
+
+	// Sort results by creation date (newest first)
+	sort.Slice(results, func(i, j int) bool {
+		// Put errors at the end
+		if results[i].Error != "" && results[j].Error == "" {
+			return false
+		}
+		if results[i].Error == "" && results[j].Error != "" {
+			return true
+		}
+		if results[i].Error != "" && results[j].Error != "" {
+			return results[i].Tag < results[j].Tag
+		}
+		return results[i].Created.After(results[j].Created)
+	})
+
+	// Recalculate size diffs after sorting
+	for i := range results {
+		if i > 0 && results[i].Error == "" {
+			for j := i - 1; j >= 0; j-- {
+				if results[j].Error == "" {
+					results[i].SizeDiff = results[i].Size - results[j].Size
+					break
+				}
+			}
+		}
 	}
 
 	return generateRegistryReport(results, imageName)
