@@ -6,12 +6,9 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
 	"strings"
 	"time"
 
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/client"
 	"github.com/jtodic/docker-time-machine/pkg/docker"
 	"github.com/olekukonko/tablewriter"
 	"github.com/schollz/progressbar/v3"
@@ -25,7 +22,6 @@ var registryFlags struct {
 	until    string
 	format   string
 	output   string
-	skipPull bool
 	platform string
 }
 
@@ -69,8 +65,11 @@ var registryCmd = &cobra.Command{
 	Short: "Analyze Docker image evolution from a container registry",
 	Long: `Analyze Docker images directly from a container registry without rebuilding.
 
-This command pulls image metadata (and optionally the full image) from registries
-like Docker Hub, Amazon ECR, Google GCR, GitHub GHCR, or any OCI-compliant registry.
+This command fetches image metadata from registries like Docker Hub, Amazon ECR,
+Google GCR, GitHub GHCR, or any OCI-compliant registry.
+
+It fetches only the manifest and config (~10KB per image) without downloading
+the full image layers. This is fast and doesn't use disk space.
 
 It tracks how image size and layers have changed across tags/versions, helping you
 identify which release introduced bloat without access to the original source code.
@@ -85,20 +84,14 @@ Supported registries:
 
 Authentication uses your existing Docker credentials (~/.docker/config.json).
 Run 'docker login <registry>' first if needed.`,
-	Example: `  # Analyze last 10 tags of an image
+	Example: `  # Analyze last 10 tags
   dtm registry nginx --last 10
 
   # Analyze specific tags
   dtm registry mycompany/api --tags "v1.0.0,v1.1.0,v1.2.0,latest"
 
-  # Analyze with date filter
-  dtm registry python --last 20 --since 2024-01-01
-
   # Generate HTML report
   dtm registry node --last 15 --format chart
-
-  # Skip pulling (use cached images only)
-  dtm registry myapp --tags "v1,v2,v3" --skip-pull
 
   # Specify platform for multi-arch images
   dtm registry nginx --last 5 --platform linux/amd64`,
@@ -115,25 +108,17 @@ func init() {
 	registryCmd.Flags().StringVar(&registryFlags.until, "until", "", "Analyze tags created until date (YYYY-MM-DD)")
 	registryCmd.Flags().StringVarP(&registryFlags.format, "format", "f", "table", "Output format: table, json, csv, chart, markdown")
 	registryCmd.Flags().StringVarP(&registryFlags.output, "output", "o", "", "Output file path")
-	registryCmd.Flags().BoolVar(&registryFlags.skipPull, "skip-pull", false, "Skip pulling, only analyze cached images")
 	registryCmd.Flags().StringVar(&registryFlags.platform, "platform", "", "Platform for multi-arch images (e.g., linux/amd64)")
 }
 
 func runRegistry(cmd *cobra.Command, args []string) error {
 	imageName := args[0]
 
-	cli, err := client.NewClientWithOpts(
-		client.FromEnv,
-		client.WithAPIVersionNegotiation(),
-	)
-	if err != nil {
-		return fmt.Errorf("failed to create Docker client: %w", err)
-	}
-	defer cli.Close()
-
 	ctx := context.Background()
 
-	tags, err := getTagsToAnalyze(ctx, cli, imageName)
+	regClient := docker.NewRegistryClient()
+
+	tags, err := getTagsToAnalyze(ctx, regClient, imageName)
 	if err != nil {
 		return fmt.Errorf("failed to get tags: %w", err)
 	}
@@ -148,16 +133,22 @@ func runRegistry(cmd *cobra.Command, args []string) error {
 		progressbar.OptionEnableColorCodes(true),
 		progressbar.OptionShowCount(),
 		progressbar.OptionSetWidth(40),
-		progressbar.OptionSetDescription("[cyan]Analyzing tags...[reset]"),
+		progressbar.OptionSetDescription("[cyan]Fetching metadata...[reset]"),
 	)
 
 	var results []RegistryResult
+	var errorCount int
 	for i, tag := range tags {
 		bar.Add(1)
 
-		result := analyzeRegistryImage(ctx, cli, imageName, tag)
+		result := analyzeRegistryImageMetadata(ctx, regClient, imageName, tag)
 
-		if i > 0 && result.Error == "" {
+		if result.Error != "" {
+			errorCount++
+			if verbose {
+				fmt.Fprintf(os.Stderr, "\n  ⚠️ %s: %s\n", tag, result.Error)
+			}
+		} else if i > 0 {
 			for j := i - 1; j >= 0; j-- {
 				if results[j].Error == "" {
 					result.SizeDiff = result.Size - results[j].Size
@@ -171,10 +162,23 @@ func runRegistry(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintf(os.Stderr, "\n")
 
+	// Report error summary
+	successCount := len(results) - errorCount
+	if errorCount > 0 {
+		fmt.Fprintf(os.Stderr, "⚠️  %d/%d tags failed to fetch metadata\n", errorCount, len(results))
+		if !verbose {
+			fmt.Fprintf(os.Stderr, "   Use -v for details\n")
+		}
+	}
+
+	if successCount == 0 {
+		return fmt.Errorf("all %d tags failed to fetch metadata - check network or authentication", len(results))
+	}
+
 	return generateRegistryReport(results, imageName)
 }
 
-func getTagsToAnalyze(ctx context.Context, cli *client.Client, imageName string) ([]string, error) {
+func getTagsToAnalyze(ctx context.Context, regClient *docker.RegistryClient, imageName string) ([]string, error) {
 	if registryFlags.tags != "" {
 		tags := strings.Split(registryFlags.tags, ",")
 		for i := range tags {
@@ -183,153 +187,80 @@ func getTagsToAnalyze(ctx context.Context, cli *client.Client, imageName string)
 		return tags, nil
 	}
 
-	regClient := docker.NewRegistryClient()
 	remoteTags, err := regClient.ListTags(ctx, imageName, registryFlags.last)
-	if err == nil && len(remoteTags) > 0 {
-		var tags []string
-		for _, t := range remoteTags {
-			tags = append(tags, t.Name)
-		}
-		fmt.Fprintf(os.Stderr, "📋 Found %d tags from registry\n", len(tags))
-		return tags, nil
-	}
-
-	if verbose && err != nil {
-		fmt.Fprintf(os.Stderr, "⚠️  Could not list remote tags: %v\n", err)
-		fmt.Fprintf(os.Stderr, "   Falling back to local images...\n")
-	}
-
-	images, err := cli.ImageList(ctx, image.ListOptions{})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to list tags: %w", err)
+	}
+
+	if len(remoteTags) == 0 {
+		return nil, fmt.Errorf("no tags found for %s", imageName)
 	}
 
 	var tags []string
-	tagSet := make(map[string]bool)
-
-	for _, img := range images {
-		for _, repoTag := range img.RepoTags {
-			parts := strings.Split(repoTag, ":")
-			if len(parts) != 2 {
-				continue
-			}
-
-			imgName := parts[0]
-			tag := parts[1]
-
-			if imgName == imageName || strings.HasSuffix(imgName, "/"+imageName) {
-				if !tagSet[tag] {
-					tagSet[tag] = true
-					tags = append(tags, tag)
-				}
-			}
-		}
+	for _, t := range remoteTags {
+		tags = append(tags, t.Name)
 	}
-
-	if len(tags) == 0 {
-		fmt.Fprintf(os.Stderr, "⚠️  No tags found for %s\n", imageName)
-		fmt.Fprintf(os.Stderr, "   Use --tags to specify tags to pull and analyze:\n")
-		fmt.Fprintf(os.Stderr, "   dtm registry %s --tags \"latest,v1.0,v2.0\"\n\n", imageName)
-		return []string{"latest"}, nil
-	}
-
-	sort.Strings(tags)
-	if registryFlags.last > 0 && len(tags) > registryFlags.last {
-		tags = tags[:registryFlags.last]
-	}
-
+	fmt.Fprintf(os.Stderr, "📋 Found %d tags from registry\n", len(tags))
 	return tags, nil
 }
 
-func analyzeRegistryImage(ctx context.Context, cli *client.Client, imageName, tag string) RegistryResult {
-	fullRef := fmt.Sprintf("%s:%s", imageName, tag)
-
+// analyzeRegistryImageMetadata fetches image metadata from registry without pulling full image
+func analyzeRegistryImageMetadata(ctx context.Context, regClient *docker.RegistryClient, imageName, tag string) RegistryResult {
 	result := RegistryResult{
 		Tag: tag,
 	}
 
-	if !registryFlags.skipPull {
-		if verbose {
-			fmt.Fprintf(os.Stderr, "\n  Pulling %s...\n", fullRef)
-		}
-
-		pullOpts := image.PullOptions{}
-		if registryFlags.platform != "" {
-			pullOpts.Platform = registryFlags.platform
-		}
-
-		reader, err := cli.ImagePull(ctx, fullRef, pullOpts)
-		if err != nil {
-			result.Error = fmt.Sprintf("pull failed: %v", err)
-			return result
-		}
-		defer reader.Close()
-		io.Copy(io.Discard, reader)
-	}
-
-	inspect, err := cli.ImageInspect(ctx, fullRef)
+	metadata, err := regClient.GetImageMetadata(ctx, imageName, tag, registryFlags.platform)
 	if err != nil {
-		result.Error = fmt.Sprintf("inspect failed: %v", err)
+		result.Error = fmt.Sprintf("metadata fetch failed: %v", err)
 		return result
 	}
 
-	result.Size = inspect.Size
-	result.SizeMB = float64(inspect.Size) / 1024 / 1024
-	result.LayerCount = len(inspect.RootFS.Layers)
+	result.Digest = metadata.Digest
+	result.Size = metadata.Size
+	result.SizeMB = float64(metadata.Size) / 1024 / 1024
+	result.Created = metadata.Created
+	result.LayerCount = metadata.LayerCount
 
-	if len(inspect.RepoDigests) > 0 {
-		result.Digest = inspect.RepoDigests[0]
-	}
-
-	if inspect.Created != "" {
-		if t, err := time.Parse(time.RFC3339Nano, inspect.Created); err == nil {
-			result.Created = t
+	// Convert layer metadata to LayerInfo
+	for _, layer := range metadata.Layers {
+		info := LayerInfo{
+			Digest:    layer.Digest,
+			CreatedBy: layer.CreatedBy,
+			Size:      layer.Size,
+			SizeMB:    layer.SizeMB,
 		}
-	}
-
-	history, err := cli.ImageHistory(ctx, fullRef)
-	if err == nil {
-		for _, layer := range history {
-			// Include all layers, even empty ones (Size == 0)
-			// Empty layers will show as "0.00", missing layers will show as "-"
-			info := LayerInfo{
-				CreatedBy: cleanLayerCmd(layer.CreatedBy),
-				Size:      layer.Size,
-				SizeMB:    float64(layer.Size) / 1024 / 1024,
-			}
-			result.Layers = append(result.Layers, info)
-		}
+		result.Layers = append(result.Layers, info)
 	}
 
 	return result
-}
-
-// cleanLayerCmd removes common prefixes but keeps full command for accurate matching
-func cleanLayerCmd(cmd string) string {
-	cmd = strings.TrimPrefix(cmd, "/bin/sh -c ")
-	cmd = strings.TrimPrefix(cmd, "#(nop) ")
-	cmd = strings.TrimSpace(cmd)
-	return cmd
 }
 
 func buildRegistryLayerComparison(validResults []RegistryResult) ([]string, []RegistryLayerComparison) {
 	layerCommands := make([]string, 0)
 	layerCommandSet := make(map[string]bool)
 
-	if len(validResults) > 0 {
-		for _, layer := range validResults[0].Layers {
-			if !layerCommandSet[layer.CreatedBy] {
-				layerCommands = append(layerCommands, layer.CreatedBy)
-				layerCommandSet[layer.CreatedBy] = true
-			}
+	// Handle empty input
+	if len(validResults) == 0 {
+		return layerCommands, []RegistryLayerComparison{}
+	}
+
+	// Collect unique layer commands from first result
+	for _, layer := range validResults[0].Layers {
+		if !layerCommandSet[layer.CreatedBy] {
+			layerCommands = append(layerCommands, layer.CreatedBy)
+			layerCommandSet[layer.CreatedBy] = true
 		}
 	}
 
-	for _, result := range validResults[1:] {
-		for _, layer := range result.Layers {
-			if !layerCommandSet[layer.CreatedBy] {
-				layerCommands = append(layerCommands, layer.CreatedBy)
-				layerCommandSet[layer.CreatedBy] = true
+	// Collect from remaining results
+	if len(validResults) > 1 {
+		for _, result := range validResults[1:] {
+			for _, layer := range result.Layers {
+				if !layerCommandSet[layer.CreatedBy] {
+					layerCommands = append(layerCommands, layer.CreatedBy)
+					layerCommandSet[layer.CreatedBy] = true
+				}
 			}
 		}
 	}
@@ -922,44 +853,45 @@ func generateRegistryChartReport(w io.Writer, results []RegistryResult, imageNam
             font-style: italic;
             margin-top: 10px;
         }
-        .layer-table-container { overflow-x: auto; }
+        .layer-table-container { 
+            overflow-x: auto;
+            max-height: 600px;
+            overflow-y: auto;
+        }
         .layer-table {
-            width: 100%%;
             border-collapse: collapse;
             margin-top: 15px;
-            font-size: 0.9em;
-            table-layout: fixed;
+            font-size: 0.85em;
         }
         .layer-table th, .layer-table td {
-            padding: 10px 12px;
+            padding: 8px 10px;
             text-align: left;
             border-bottom: 1px solid #eee;
+            white-space: nowrap;
         }
         .layer-table th {
             background: #f8f9fa;
             font-weight: 600;
             position: sticky;
             top: 0;
-            white-space: nowrap;
+            z-index: 1;
         }
         .layer-table th:first-child {
             position: sticky;
             left: 0;
-            z-index: 2;
+            z-index: 3;
             background: #f8f9fa;
-            min-width: 400px;
-            width: 400px;
+            min-width: 300px;
         }
         .layer-table td:first-child {
             position: sticky;
             left: 0;
+            z-index: 1;
             background: white;
-            min-width: 400px;
+            min-width: 300px;
             max-width: 400px;
-            width: 400px;
             font-family: 'Monaco', 'Menlo', monospace;
-            font-size: 0.85em;
-            white-space: nowrap;
+            font-size: 0.8em;
             overflow: hidden;
             text-overflow: ellipsis;
             cursor: help;
@@ -968,17 +900,14 @@ func generateRegistryChartReport(w io.Writer, results []RegistryResult, imageNam
             white-space: normal;
             word-break: break-all;
             overflow: visible;
-            position: sticky;
-            left: 0;
             z-index: 10;
             background: #ffffcc;
             box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
         }
         .layer-table th:not(:first-child),
         .layer-table td:not(:first-child) {
-            min-width: 100px;
+            min-width: 70px;
             text-align: right;
-            white-space: nowrap;
         }
         .layer-table tr:hover td { background: #f8f9fa; }
         .layer-table tr:hover td:first-child { background: #f0f0f0; }
@@ -1005,6 +934,7 @@ func generateRegistryChartReport(w io.Writer, results []RegistryResult, imageNam
 
     <div class="chart-container">
         <h2>📦 Layer Size Comparison Across Tags</h2>
+        <p class="note">Scroll horizontally to see all tags. Hover over layer commands to see full text.</p>
         <div class="layer-table-container">
             <table class="layer-table" id="layerComparisonTable">
                 <thead>

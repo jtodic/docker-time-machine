@@ -514,3 +514,378 @@ func (rc *RegistryClient) listOCITags(ctx context.Context, registry, repo string
 
 	return tags, nil
 }
+
+// ImageMetadata holds metadata fetched from registry without pulling full image
+type ImageMetadata struct {
+	Digest     string          `json:"digest"`
+	Size       int64           `json:"size"`
+	Created    time.Time       `json:"created"`
+	LayerCount int             `json:"layer_count"`
+	Layers     []LayerMetadata `json:"layers"`
+}
+
+// LayerMetadata holds layer information from registry
+type LayerMetadata struct {
+	Digest    string  `json:"digest"`
+	Size      int64   `json:"size"`
+	SizeMB    float64 `json:"size_mb"`
+	CreatedBy string  `json:"created_by"`
+	Empty     bool    `json:"empty"`
+}
+
+// ManifestResponse represents the OCI/Docker manifest
+type ManifestResponse struct {
+	SchemaVersion int    `json:"schemaVersion"`
+	MediaType     string `json:"mediaType"`
+	Config        struct {
+		MediaType string `json:"mediaType"`
+		Size      int64  `json:"size"`
+		Digest    string `json:"digest"`
+	} `json:"config"`
+	Layers []struct {
+		MediaType string `json:"mediaType"`
+		Size      int64  `json:"size"`
+		Digest    string `json:"digest"`
+	} `json:"layers"`
+}
+
+// ManifestListResponse represents a multi-arch manifest list
+type ManifestListResponse struct {
+	SchemaVersion int    `json:"schemaVersion"`
+	MediaType     string `json:"mediaType"`
+	Manifests     []struct {
+		MediaType string `json:"mediaType"`
+		Size      int64  `json:"size"`
+		Digest    string `json:"digest"`
+		Platform  struct {
+			Architecture string `json:"architecture"`
+			OS           string `json:"os"`
+			Variant      string `json:"variant,omitempty"`
+		} `json:"platform"`
+	} `json:"manifests"`
+}
+
+// ConfigResponse represents the image config blob
+type ConfigResponse struct {
+	Created      time.Time `json:"created"`
+	Architecture string    `json:"architecture"`
+	OS           string    `json:"os"`
+	History      []struct {
+		Created    time.Time `json:"created"`
+		CreatedBy  string    `json:"created_by"`
+		EmptyLayer bool      `json:"empty_layer,omitempty"`
+	} `json:"history"`
+	RootFS struct {
+		Type    string   `json:"type"`
+		DiffIDs []string `json:"diff_ids"`
+	} `json:"rootfs"`
+}
+
+// GetImageMetadata fetches image metadata from registry without pulling the full image
+func (rc *RegistryClient) GetImageMetadata(ctx context.Context, imageName, tag, platform string) (*ImageMetadata, error) {
+	registry, repo := parseImageName(imageName)
+
+	// Get auth token
+	token, err := rc.getAuthToken(ctx, registry, repo)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get auth token: %w", err)
+	}
+
+	// Fetch manifest
+	manifest, manifestDigest, err := rc.fetchManifest(ctx, registry, repo, tag, token, platform)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch manifest: %w", err)
+	}
+
+	// Fetch config blob to get history (CreatedBy commands)
+	config, err := rc.fetchConfigBlob(ctx, registry, repo, manifest.Config.Digest, token)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch config: %w", err)
+	}
+
+	// Build layer metadata by matching layers with history
+	layers := rc.buildLayerMetadata(manifest, config)
+
+	// Calculate total size
+	var totalSize int64
+	for _, layer := range manifest.Layers {
+		totalSize += layer.Size
+	}
+
+	return &ImageMetadata{
+		Digest:     manifestDigest,
+		Size:       totalSize,
+		Created:    config.Created,
+		LayerCount: len(manifest.Layers),
+		Layers:     layers,
+	}, nil
+}
+
+// getAuthToken gets an authentication token for the registry
+func (rc *RegistryClient) getAuthToken(ctx context.Context, registry, repo string) (string, error) {
+	// Try to get credentials from docker config
+	username, password, credErr := rc.getDockerCredentials(registry)
+
+	// For Docker Hub, use auth.docker.io
+	if registry == "docker.io" {
+		tokenURL := fmt.Sprintf("https://auth.docker.io/token?service=registry.docker.io&scope=repository:%s:pull", repo)
+		req, err := http.NewRequestWithContext(ctx, "GET", tokenURL, nil)
+		if err != nil {
+			return "", err
+		}
+
+		// Add basic auth if we have credentials
+		if credErr == nil && username != "" {
+			req.SetBasicAuth(username, password)
+		}
+
+		resp, err := rc.httpClient.Do(req)
+		if err != nil {
+			return "", err
+		}
+		defer resp.Body.Close()
+
+		var tokenResp struct {
+			Token string `json:"token"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
+			return "", err
+		}
+		return tokenResp.Token, nil
+	}
+
+	// For GCR
+	if strings.Contains(registry, "gcr.io") {
+		tokenURL := fmt.Sprintf("https://%s/v2/token?service=%s&scope=repository:%s:pull", registry, registry, repo)
+		req, err := http.NewRequestWithContext(ctx, "GET", tokenURL, nil)
+		if err != nil {
+			return "", err
+		}
+
+		resp, err := rc.httpClient.Do(req)
+		if err != nil {
+			return "", err
+		}
+		defer resp.Body.Close()
+
+		var tokenResp struct {
+			Token string `json:"token"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
+			return "", err
+		}
+		return tokenResp.Token, nil
+	}
+
+	// For GHCR
+	if strings.Contains(registry, "ghcr.io") {
+		tokenURL := fmt.Sprintf("https://%s/token?service=%s&scope=repository:%s:pull", registry, registry, repo)
+		req, err := http.NewRequestWithContext(ctx, "GET", tokenURL, nil)
+		if err != nil {
+			return "", err
+		}
+
+		// Add basic auth if we have credentials (for private repos)
+		if credErr == nil && username != "" {
+			req.SetBasicAuth(username, password)
+		}
+
+		resp, err := rc.httpClient.Do(req)
+		if err != nil {
+			return "", err
+		}
+		defer resp.Body.Close()
+
+		var tokenResp struct {
+			Token string `json:"token"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
+			return "", err
+		}
+		return tokenResp.Token, nil
+	}
+
+	// For other registries, return basic auth credentials encoded
+	if credErr == nil && username != "" {
+		return "Basic " + base64.StdEncoding.EncodeToString([]byte(username+":"+password)), nil
+	}
+
+	return "", nil
+}
+
+// fetchManifest fetches the image manifest from the registry
+func (rc *RegistryClient) fetchManifest(ctx context.Context, registry, repo, tag, token, platform string) (*ManifestResponse, string, error) {
+	var baseURL string
+	if registry == "docker.io" {
+		baseURL = "https://registry-1.docker.io"
+	} else {
+		baseURL = fmt.Sprintf("https://%s", registry)
+	}
+
+	url := fmt.Sprintf("%s/v2/%s/manifests/%s", baseURL, repo, tag)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, "", err
+	}
+
+	// Accept both manifest types
+	req.Header.Set("Accept", "application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.index.v1+json")
+
+	if token != "" {
+		if strings.HasPrefix(token, "Basic ") {
+			req.Header.Set("Authorization", token)
+		} else {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+	}
+
+	resp, err := rc.httpClient.Do(req)
+	if err != nil {
+		return nil, "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, "", fmt.Errorf("manifest fetch failed (%d): %s", resp.StatusCode, string(body))
+	}
+
+	manifestDigest := resp.Header.Get("Docker-Content-Digest")
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", err
+	}
+
+	// Check if it's a manifest list (multi-arch)
+	contentType := resp.Header.Get("Content-Type")
+	if strings.Contains(contentType, "manifest.list") || strings.Contains(contentType, "image.index") {
+		var manifestList ManifestListResponse
+		if err := json.Unmarshal(body, &manifestList); err != nil {
+			return nil, "", err
+		}
+
+		// Find the right platform
+		targetArch := "amd64"
+		targetOS := "linux"
+		targetVariant := ""
+
+		if platform != "" {
+			parts := strings.Split(platform, "/")
+			if len(parts) >= 2 {
+				targetOS = parts[0]
+				targetArch = parts[1]
+			}
+			if len(parts) >= 3 {
+				targetVariant = parts[2]
+			}
+		}
+
+		var selectedDigest string
+		for _, m := range manifestList.Manifests {
+			if m.Platform.OS == targetOS && m.Platform.Architecture == targetArch {
+				if targetVariant == "" || m.Platform.Variant == targetVariant {
+					selectedDigest = m.Digest
+					break
+				}
+			}
+		}
+
+		if selectedDigest == "" {
+			// Fallback to first manifest
+			if len(manifestList.Manifests) > 0 {
+				selectedDigest = manifestList.Manifests[0].Digest
+			} else {
+				return nil, "", fmt.Errorf("no suitable manifest found for platform %s", platform)
+			}
+		}
+
+		// Fetch the actual manifest by digest
+		return rc.fetchManifest(ctx, registry, repo, selectedDigest, token, "")
+	}
+
+	var manifest ManifestResponse
+	if err := json.Unmarshal(body, &manifest); err != nil {
+		return nil, "", err
+	}
+
+	return &manifest, manifestDigest, nil
+}
+
+// fetchConfigBlob fetches the config blob containing history
+func (rc *RegistryClient) fetchConfigBlob(ctx context.Context, registry, repo, digest, token string) (*ConfigResponse, error) {
+	var baseURL string
+	if registry == "docker.io" {
+		baseURL = "https://registry-1.docker.io"
+	} else {
+		baseURL = fmt.Sprintf("https://%s", registry)
+	}
+
+	url := fmt.Sprintf("%s/v2/%s/blobs/%s", baseURL, repo, digest)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if token != "" {
+		if strings.HasPrefix(token, "Basic ") {
+			req.Header.Set("Authorization", token)
+		} else {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+	}
+
+	resp, err := rc.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("config fetch failed (%d): %s", resp.StatusCode, string(body))
+	}
+
+	var config ConfigResponse
+	if err := json.NewDecoder(resp.Body).Decode(&config); err != nil {
+		return nil, err
+	}
+
+	return &config, nil
+}
+
+// buildLayerMetadata matches manifest layers with config history
+func (rc *RegistryClient) buildLayerMetadata(manifest *ManifestResponse, config *ConfigResponse) []LayerMetadata {
+	var layers []LayerMetadata
+
+	// History includes empty layers, manifest.Layers does not
+	// We need to match them up correctly
+	layerIdx := 0
+	for _, h := range config.History {
+		layer := LayerMetadata{
+			CreatedBy: cleanCreatedBy(h.CreatedBy),
+			Empty:     h.EmptyLayer,
+		}
+
+		if !h.EmptyLayer && layerIdx < len(manifest.Layers) {
+			layer.Digest = manifest.Layers[layerIdx].Digest
+			layer.Size = manifest.Layers[layerIdx].Size
+			layer.SizeMB = float64(manifest.Layers[layerIdx].Size) / 1024 / 1024
+			layerIdx++
+		}
+
+		layers = append(layers, layer)
+	}
+
+	return layers
+}
+
+// cleanCreatedBy cleans up the CreatedBy string
+func cleanCreatedBy(cmd string) string {
+	cmd = strings.TrimPrefix(cmd, "/bin/sh -c ")
+	cmd = strings.TrimPrefix(cmd, "#(nop) ")
+	cmd = strings.TrimSpace(cmd)
+	return cmd
+}
