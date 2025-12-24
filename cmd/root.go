@@ -13,37 +13,40 @@ var (
 
 var rootCmd = &cobra.Command{
 	Use:   "dtm",
-	Short: "Docker Time Machine - Track Docker image evolution through git history",
+	Short: "Docker Time Machine - Track Docker image evolution through git history and registries",
 	Long: `DTM (Docker Time Machine) helps you understand how your Docker images have
-evolved over time by building them at different points in your git history.
+evolved over time—either by analyzing tags from a container registry or by
+building images at different points in your git history.
 
 Use DTM to:
 
+  • Analyze image size trends directly from registries (Docker Hub, ECR, GCR, GHCR, ACR, JFrog)
   • Find the exact commit that introduced image bloat
   • Track build time trends across your project's history
   • Monitor layer count changes over time
   • Generate reports to share with your team
   • Compare image metrics between branches or tags
 
-DTM walks through your git history, builds the Docker image at each commit,
-and records key metrics. It then generates reports showing trends and
-highlighting significant changes—both regressions and optimizations.
+Commands:
+  registry  - Analyze images directly from a container registry (fast, no rebuilds)
+  analyze   - Build and analyze images across git history (requires source code)
 
 Getting started:
-  Run 'dtm analyze' in a git repository containing a Dockerfile to generate
-  your first report. Use 'dtm analyze --help' for all available options.`,
-	Example: `  # Quick analysis of current repo
+  Run 'dtm registry nginx --last 10' to analyze the last 10 tags of nginx.
+  Run 'dtm analyze' in a git repository containing a Dockerfile.`,
+	Example: `  # Analyze image tags from a registry (fast - no rebuilds needed)
+  dtm registry nginx --last 10
+  dtm registry mycompany/api --tags "v1.0.0,v1.1.0,v1.2.0"
+  dtm registry ghcr.io/owner/repo --format chart
+
+  # Analyze git history by rebuilding at each commit
   dtm analyze
-
-  # Generate HTML charts for visualization
   dtm analyze --format chart --output report.html
-
-  # Analyze last 10 commits with verbose output
   dtm analyze -n 10 -v
 
   # Export to JSON for further processing
   dtm analyze --format json --output metrics.json`,
-	Version: "0.2.0",
+	Version: "1.0.0",
 }
 
 func Execute() {
