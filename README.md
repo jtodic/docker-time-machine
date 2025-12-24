@@ -60,6 +60,7 @@ dtm analyze --skip-failed -v
 ```bash
 git clone https://github.com/jtodic/docker-time-machine.git
 cd docker-time-machine
+go mod download
 make build
 make install
 ```
