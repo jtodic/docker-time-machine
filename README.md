@@ -128,6 +128,10 @@ Generates an interactive report with:
 - 📊 **Size by layer** — stacked bar chart showing layer contributions
 - 📦 **Layer comparison table** — detailed breakdown across versions
 
+![Example Image1](images/example1.png)
+
+![Example Image2](images/example2.png)
+
 ## Use Cases
 
 ### Monitoring Production Images
