@@ -1147,6 +1147,8 @@ func truncate(s string, maxLen int) string {
 
 func truncateLayerCommand(cmd string) string {
 	// Clean up the command string - remove /bin/sh -c prefix
+	// NOTE: We do NOT truncate here to preserve uniqueness for layer matching
+	// Truncation happens only at display time via truncate() function
 	cmd = strings.TrimPrefix(cmd, "/bin/sh -c ")
 	cmd = strings.TrimPrefix(cmd, "#(nop) ")
 	cmd = strings.TrimSpace(cmd)
