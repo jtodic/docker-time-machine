@@ -933,23 +933,25 @@ func (rc *RegistryClient) fetchConfigBlob(ctx context.Context, registry, repo, d
 func (rc *RegistryClient) buildLayerMetadata(manifest *ManifestResponse, config *ConfigResponse) []LayerMetadata {
 	var layers []LayerMetadata
 
-	// History includes empty layers, manifest.Layers does not
-	// We need to match them up correctly
+	// History includes empty layers (ARG, LABEL, ENV, etc.), manifest.Layers does not
+	// We only include layers that have actual filesystem content
 	layerIdx := 0
 	for _, h := range config.History {
-		layer := LayerMetadata{
-			CreatedBy: cleanCreatedBy(h.CreatedBy),
-			Empty:     h.EmptyLayer,
+		if h.EmptyLayer {
+			continue // Skip metadata-only layers
 		}
 
-		if !h.EmptyLayer && layerIdx < len(manifest.Layers) {
-			layer.Digest = manifest.Layers[layerIdx].Digest
-			layer.Size = manifest.Layers[layerIdx].Size
-			layer.SizeMB = float64(manifest.Layers[layerIdx].Size) / 1024 / 1024
+		if layerIdx < len(manifest.Layers) {
+			layer := LayerMetadata{
+				CreatedBy: cleanCreatedBy(h.CreatedBy),
+				Digest:    manifest.Layers[layerIdx].Digest,
+				Size:      manifest.Layers[layerIdx].Size,
+				SizeMB:    float64(manifest.Layers[layerIdx].Size) / 1024 / 1024,
+				Empty:     false,
+			}
+			layers = append(layers, layer)
 			layerIdx++
 		}
-
-		layers = append(layers, layer)
 	}
 
 	return layers

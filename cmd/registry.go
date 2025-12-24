@@ -184,10 +184,13 @@ func runRegistry(cmd *cobra.Command, args []string) error {
 		return results[i].Created.After(results[j].Created)
 	})
 
-	// Recalculate size diffs after sorting
+	// Recalculate size diffs after sorting (newest first)
+	// Diff shows change FROM the previous (older) version TO this version
+	// So we compare each item to the next item (which is older)
 	for i := range results {
-		if i > 0 && results[i].Error == "" {
-			for j := i - 1; j >= 0; j-- {
+		if results[i].Error == "" && i < len(results)-1 {
+			// Find next valid result (older version)
+			for j := i + 1; j < len(results); j++ {
 				if results[j].Error == "" {
 					results[i].SizeDiff = results[i].Size - results[j].Size
 					break
@@ -294,15 +297,18 @@ func buildRegistryLayerComparison(validResults []RegistryResult) ([]string, []Re
 		}
 
 		for _, result := range validResults {
+			// Sum all layers with this command (handles duplicate commands)
+			var totalSize float64
 			found := false
 			for _, layer := range result.Layers {
 				if layer.CreatedBy == cmd {
-					comparison.SizeByTag[result.Tag] = layer.SizeMB
+					totalSize += layer.SizeMB
 					found = true
-					break
 				}
 			}
-			if !found {
+			if found {
+				comparison.SizeByTag[result.Tag] = totalSize
+			} else {
 				comparison.SizeByTag[result.Tag] = -1
 			}
 		}
