@@ -131,7 +131,7 @@ func (tm *TimeMachine) Run(ctx context.Context) error {
 	}
 
 	// Analyze each commit
-	for i, commit := range commits {
+	for _, commit := range commits {
 		bar.Add(1)
 
 		if tm.config.Verbose {
@@ -141,17 +141,6 @@ func (tm *TimeMachine) Run(ctx context.Context) error {
 		}
 
 		result := tm.analyzeCommit(ctx, commit)
-
-		// Calculate size difference from previous successful build
-		if i > 0 && result.Error == "" {
-			for j := i - 1; j >= 0; j-- {
-				if tm.results[j].Error == "" {
-					result.SizeDiff = result.ImageSize - tm.results[j].ImageSize
-					break
-				}
-			}
-		}
-
 		tm.results = append(tm.results, result)
 
 		if result.Error != "" && !tm.config.SkipFailed {
@@ -159,6 +148,23 @@ func (tm *TimeMachine) Run(ctx context.Context) error {
 				fmt.Fprintf(os.Stderr, "  ❌ Build failed: %s\n", result.Error)
 			}
 		}
+	}
+
+	// Calculate size differences after all commits are analyzed
+	// Commits are ordered newest-first, so we compare each commit to the next one (older)
+	// The diff shows how size changed FROM the older commit TO the current (newer) one
+	for i := 0; i < len(tm.results); i++ {
+		if tm.results[i].Error != "" {
+			continue
+		}
+		// Find the next (older) successful build to compare against
+		for j := i + 1; j < len(tm.results); j++ {
+			if tm.results[j].Error == "" {
+				tm.results[i].SizeDiff = tm.results[i].ImageSize - tm.results[j].ImageSize
+				break
+			}
+		}
+		// If no older commit found, SizeDiff remains 0 (the oldest commit has no diff)
 	}
 
 	// Restore original branch
@@ -188,6 +194,7 @@ func (tm *TimeMachine) Run(ctx context.Context) error {
 // getCommits retrieves all commits
 func (tm *TimeMachine) getCommits() ([]*object.Commit, error) {
 	var commits []*object.Commit
+	seen := make(map[string]bool) // Track seen commit hashes to avoid duplicates
 
 	// Parse date filters if provided
 	var sinceTime, untilTime time.Time
@@ -233,6 +240,13 @@ func (tm *TimeMachine) getCommits() ([]*object.Commit, error) {
 
 	count := 0
 	err = commitIter.ForEach(func(c *object.Commit) error {
+		// Skip duplicate commits (can happen with merge commits in git history)
+		commitHash := c.Hash.String()
+		if seen[commitHash] {
+			return nil
+		}
+		seen[commitHash] = true
+
 		// Check date filters
 		if !sinceTime.IsZero() && c.Author.When.Before(sinceTime) {
 			return nil
@@ -905,7 +919,7 @@ func (tm *TimeMachine) generateHTMLChart(w io.Writer) error {
     <div class="chart-container">
         <h2>⏱️ Build Time Analysis</h2>
         <canvas id="timeChart"></canvas>
-        <p class="note">Build times are indicative only — they depend on Docker's layer cache state and system load at the time of analysis.</p>
+        <p class="note">Build times are indicative only - they depend on Docker's layer cache state and system load at the time of analysis.</p>
     </div>
 
     <div class="chart-container">
@@ -1114,10 +1128,10 @@ func (tm *TimeMachine) findBloatCommit() *BuildResult {
 	var maxIncrease int64
 	var bloatCommit *BuildResult
 
-	for _, result := range tm.results {
-		if result.Error == "" && result.SizeDiff > maxIncrease {
-			maxIncrease = result.SizeDiff
-			bloatCommit = &result
+	for i := range tm.results {
+		if tm.results[i].Error == "" && tm.results[i].SizeDiff > maxIncrease {
+			maxIncrease = tm.results[i].SizeDiff
+			bloatCommit = &tm.results[i]
 		}
 	}
 
@@ -1128,10 +1142,10 @@ func (tm *TimeMachine) findOptimizationCommit() *BuildResult {
 	var maxDecrease int64
 	var optimizationCommit *BuildResult
 
-	for _, result := range tm.results {
-		if result.Error == "" && result.SizeDiff < maxDecrease {
-			maxDecrease = result.SizeDiff
-			optimizationCommit = &result
+	for i := range tm.results {
+		if tm.results[i].Error == "" && tm.results[i].SizeDiff < maxDecrease {
+			maxDecrease = tm.results[i].SizeDiff
+			optimizationCommit = &tm.results[i]
 		}
 	}
 
